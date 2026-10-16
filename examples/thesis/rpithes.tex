@@ -1,0 +1,24 @@
+\documentclass[chap]{thesis}
+
+% Uncomment the following if you want centered-lined captions:
+%\captionsetup{format=plain,justification=centering}
+
+\usepackage{amsmath,amsthm,amssymb}
+\usepackage{multicol}
+\usepackage{todonotes}
+                  
+\begin{document}
+ 
+% Use the appropriate example title page.  A senior thesis
+% can be set by changing the thesis name in rpititle-mas.tex.
+\include{rpititle-phd}   % titlepage material for PhD thesis 
+%\include{rpititle-mas}   % titlepage material for Master thesis 
+\include{rpiack}  % include for acknowledgements
+\include{rpiabs} % abstract
+\input{Chapters/rpichap1} % chapter 1
+\input{Chapters/rpichap2} % chapter 2
+\input{Chapters/rpichap3} % chapter 3
+\include{rpibib} % bibliography
+\include{rpiapp} % appendix
+ 
+\end{document}
