@@ -5,7 +5,7 @@ root = "sample.lean"
 # The bib files for \cite commands
 bibliography = ["refs.bib"]
 
-[command_map]
+[commandMap]
 "\\specialhead{REFERENCES}" = "\\part{References}"
 "\\specialhead{ABSTRACT}" = "\\section{Abstract}"
 "\\specialhead{ACKNOWLEDGMENT}" = "\\section{Acknowledgment}"

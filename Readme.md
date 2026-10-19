@@ -8,12 +8,18 @@ integrates them seamlessly into the document structure.
 
 Myne complies to either TeX which can be compiled with standard LaTeX tools, or Verso-esque website formats.
 
-## Features
+## Usage / Features
+
+Myne can be run at the command line using the myne command. Myne can be configured using a `myne.toml` configuration file or passing configuration options directly as command line arguments.
 
 ### Rendering
 Myne's main feature is rendering Lean4 and LaTeX content into either LaTeX or web formats. It focuses on speed and seamless integration of Lean4 code and documentation.
 
-To use Myne from the command line, you can run `myne` command:
+To use Myne from the command line, you can run `myne` command. The command will look for a `myne.toml` configuration file in the current directory by default, unless overridden by command line arguments. Configuration options for `myne.toml` are:
+- `root` : Specifies the root input Lean4 or LaTeX source file. 
+- `outputDir` : Specifies the output directory. defaults to `./out`
+- `bibliography` : Links a bibtex bibliography `.bib` file at the end of document. This is useful if root document is a `.lean` file and you dont want to add a `/-! \bibliography{...} -/` comment manually, which would otherwise be required to include the bibliography.
+- `commandMap` : A dictionary mapping unsupported LaTeX commands to their replacements for web rendering. This is useful when targeting web output and certain LaTeX commands are not supported, IE, you have a special format `.cls` file that defines custom title or section commands that would otherwise disapear on web rendering if not mapped to supported HTML equivalents.
 
 Arguments:
 - `-i <input-file>`: Specifies the root input Lean4 or LaTeX source file. Defaults to the root file in the manifest.
@@ -40,6 +46,7 @@ for now:
 ##### Citations
 - `\cite{...}` for citations within the text
 - `\citet{...}` for textual citations
+- `\bibliography{...}` for including a bibliography file and reference list.
 ##### Footnotes
 - `\footnote{...}` for footnotes within the text
 
