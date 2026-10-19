@@ -1,0 +1,6 @@
+[submodule "vendor/stringzilla"]
+	path = vendor/stringzilla
+	url = https://github.com/ashvardanian/StringZilla.git
+[submodule "vendor/katex"]
+	path = vendor/katex
+	url = https://github.com/KaTeX/KaTeX.git

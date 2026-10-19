@@ -1,0 +1,6 @@
+/myne
+/out/
+/examples/*/out/
+__pycache__/
+*.inc
+/.cache/

@@ -8,6 +8,26 @@ integrates them seamlessly into the document structure.
 
 Myne complies to either TeX which can be compiled with standard LaTeX tools, or Verso-esque website formats.
 
+## Build and quick start
+
+After cloning, run `git submodule update --init --recursive`, then `make`. The first build downloads the pinned KaTeX browser archive and verifies its SHA-256 checksum; generated `.inc` files are ignored by Git. The Makefile uses TCC when available and otherwise uses `cc`; override with `make CC=cc` or `make CC=tcc`. The resulting binary is `./myne`. KaTeX, fonts, and Myne's built-in CSS and JavaScript are embedded in the executable, so the binary generates offline HTML without a separate assets directory.
+
+From an example directory, run `../../myne`. Myne reads `myne.toml` in the current directory. For example:
+
+```sh
+cd examples/basic
+../../myne
+cd out/tex && latexmk -pdf -interaction=nonstopmode sample.tex
+```
+
+Generated pages are under `out/html/`, and compile-ready TeX plus local assets are under `out/tex/`. `-f html`, `-f tex`, or `-f both` selects which directory is generated. `--watch` rebuilds on source and asset changes. `--serve` implies watch mode and serves HTML at `http://127.0.0.1:8000/`, with automatic browser refresh. Use `--port N` to change the port.
+
+Run `myne [-i root|project-directory] [-f html|tex|both] [-o outputDir] [-s plain|verso|hutter|custom.css] [--config file] [--watch] [--serve] [--port N]`. The root and custom CSS paths are relative to the manifest directory. `bibliography` accepts a `.bib` path or an array of paths. `commandMap` performs literal replacements for HTML rendering only. Myne processes Lean source text without invoking the Lean elaborator. For HTML, unsupported LaTeX commands and their braced arguments are omitted.
+
+`-i` also accepts a project directory. For example, `./myne -i examples/basic --serve` loads `examples/basic/myne.toml` and serves that project's output from the repository root.
+
+For a Lean `/-- ... -/` comment attached to a `def`, `lemma`, or `theorem`, HTML places the comment and highlighted declaration inside one box. TeX emits the comment in an AMS `definition`, `lemma`, or `theorem` environment and omits the Lean source. Module comments (`/-! ... -/`) remain document prose.
+
 ## Usage / Features
 
 Myne can be run at the command line using the myne command. Myne can be configured using a `myne.toml` configuration file or passing configuration options directly as command line arguments.
@@ -24,10 +44,14 @@ To use Myne from the command line, you can run `myne` command. The command will 
 - `style` : Specifies a CSS style file to be used for web output. This allows customizing the appearance of the generated HTML. Built in styles are specified without the extension, while custom styles should include a path with `.css`
 
 Arguments:
-- `-i <input-file>`: Specifies the root input Lean4 or LaTeX source file. Defaults to the root file in the manifest.
-- `-f <output-file>`: output format. Supports `tex` for Latex directory output `html` for Verso-esque website output. `both` for generating both formats. Defaults to `html`.
+- `-i <input-file-or-project-directory>`: Specifies a Lean4 or LaTeX root file, or loads `myne.toml` from a project directory. Defaults to the root file in the manifest.
+- `-f <format>`: output format. Supports `tex` for LaTeX directory output, `html` for website output, or `both`. Defaults to `html`.
 - `-o <output>`: Specifies the output directory. Defaults to `./out`
 - `-s <style>`: Specifies a CSS style file to be used for web output. This allows customizing the appearance of the generated HTML. Built in styles are specified without the extension, while custom styles should include a path with `.css`
+- `--config <file>`: Read a manifest other than `myne.toml`.
+- `--watch`: Rebuild when project files change.
+- `--serve`: Watch and serve HTML on localhost, with automatic refresh.
+- `--port <number>`: Set the serve port; defaults to 8000.
 
 #### Latex Support for Web output:
 
@@ -91,7 +115,7 @@ comments and parse tex content inside of them.
 ### Web Rendering
 - Myne should use [KaTeX](https://katex.org/) for rendering and directly include the necessary minified KaTeX CSS and JavaScript in the output directory.
 - Myne should extract documentation comments and convert them into HTML, preserving the tex content within `$...$` and `$$...$$` for inline and display math respectively.
-- The code after doc comments `/-- ... -/` should be rendered as lean code with Lean4 syntax highlighting, this should end on the first double newline after the code block. Display style should change depending on the type of content, IE if `theorem` is encountered on the line after the closing `-/`, it should identify it as a theorem and apply theorem styling, similarly for `lemma` and `def.`
+- On the web, the doc comment and code after `/-- ... -/` share a styled box. The highlighted code ends at the first blank line. In TeX, `def`, `lemma`, and `theorem` comments become AMS theorem environments and the Lean code is omitted.
 
 - Footnotes should be displayed in the margin for web output, unless the screen is too narrow to accommodate them, in which case they should be displayed inline at the bottom of the content.
 - Citations should be displayed in the margin for web output, unless the screen is too narrow to accommodate them, in which case they should be displayed inline at the bottom of the content.
@@ -118,4 +142,4 @@ comments and parse tex content inside of them.
 
 Myne projects are structured as inclusion (dependency) trees of `.tex` and `.lean` files. Dependencies are made with `\input{...}`, `\bibliography{...}`, and `\includegraphics{}` in tex and lean files. Note that this dependency tree is only enforced for rendering purposes, and not for Lean's module system, which may import files that are outside of this tree.
 
-If the root file is a latex file, it should contain a document class command with a title. If the root file is a lean file, its module doc should contain a top level heading `# ...` that represents the title of the document. 
+If the root file is a latex file, it should contain a document class command with a title. If the root file is a lean file, its module doc should contain a top level heading `# ...` that represents the title of the document.
