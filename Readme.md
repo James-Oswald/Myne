@@ -17,14 +17,17 @@ Myne's main feature is rendering Lean4 and LaTeX content into either LaTeX or we
 
 To use Myne from the command line, you can run `myne` command. The command will look for a `myne.toml` configuration file in the current directory by default, unless overridden by command line arguments. Configuration options for `myne.toml` are:
 - `root` : Specifies the root input Lean4 or LaTeX source file. 
+- `format` : Specifies the output format. Supports `tex` for LaTeX directory output and `html` for Verso-esque website output. `both` for generating both formats. Defaults to `html`.
 - `outputDir` : Specifies the output directory. defaults to `./out`
 - `bibliography` : Links a bibtex bibliography `.bib` file at the end of document. This is useful if root document is a `.lean` file and you dont want to add a `/-! \bibliography{...} -/` comment manually, which would otherwise be required to include the bibliography.
 - `commandMap` : A dictionary mapping unsupported LaTeX commands to their replacements for web rendering. This is useful when targeting web output and certain LaTeX commands are not supported, IE, you have a special format `.cls` file that defines custom title or section commands that would otherwise disapear on web rendering if not mapped to supported HTML equivalents.
+- `style` : Specifies a CSS style file to be used for web output. This allows customizing the appearance of the generated HTML. Built in styles are specified without the extension, while custom styles should include a path with `.css`
 
 Arguments:
 - `-i <input-file>`: Specifies the root input Lean4 or LaTeX source file. Defaults to the root file in the manifest.
-- `-f <output-file>`: output format. Supports `tex` for Latex directory output `html` for Verso-esque website output. Defaults to `html`.
+- `-f <output-file>`: output format. Supports `tex` for Latex directory output `html` for Verso-esque website output. `both` for generating both formats. Defaults to `html`.
 - `-o <output>`: Specifies the output directory. Defaults to `./out`
+- `-s <style>`: Specifies a CSS style file to be used for web output. This allows customizing the appearance of the generated HTML. Built in styles are specified without the extension, while custom styles should include a path with `.css`
 
 #### Latex Support for Web output:
 
@@ -90,6 +93,9 @@ comments and parse tex content inside of them.
 - Myne should extract documentation comments and convert them into HTML, preserving the tex content within `$...$` and `$$...$$` for inline and display math respectively.
 - The code after doc comments `/-- ... -/` should be rendered as lean code with Lean4 syntax highlighting, this should end on the first double newline after the code block. Display style should change depending on the type of content, IE if `theorem` is encountered on the line after the closing `-/`, it should identify it as a theorem and apply theorem styling, similarly for `lemma` and `def.`
 
+- Footnotes should be displayed in the margin for web output, unless the screen is too narrow to accommodate them, in which case they should be displayed inline at the bottom of the content.
+- Citations should be displayed in the margin for web output, unless the screen is too narrow to accommodate them, in which case they should be displayed inline at the bottom of the content.
+
 - When rendering tex to web, Myne should use the supported commands, and respect sectioning.
 - Sectioning for web should work as follows:
   - Anything before the first `\part{...}` or `\chapter{...}` is considered the introduction and is rendered on the introduction page.
@@ -98,6 +104,12 @@ comments and parse tex content inside of them.
   - `\section{...}`s are rendered as `<h2>...</h2>`
   - `\subsection{...}`s are rendered as `<h3>...</h3>`
   - `\subsubsection{...}`s are rendered as `<h4>...</h4>`
+
+- Myne supports raw CSS styling for web output, providing some default styles and allowing users to create their own. Myne ships with a set of built-in styles that can be used by specifying their names in the `style` configuration option. Built in styles include:
+- `plain` : where theorems, lemmas, and definitions are displayed in a simple round cornered box with a name.
+- `verso` : where theorems, lemmas, and definitions are displayed in a simple round cornered box with a name, similar to the style used in the Verso website.
+- `hutter` : In the style of Macrus Hutters 2025 book, with definitions in green boxes and theorems and lemmas in red boxes.
+
 
 ### Tex Rendering
 - Myne should output valid LaTeX that can be compiled with standard LaTeX engines, preserving all commands and environments used in the source files.

@@ -4,5 +4,7 @@
 # Path to the root lean or tex file
 root = "sample.lean"
 
+format = "both"
+
 # The bib files for \cite commands
 bibliography = ["refs.bib"]
