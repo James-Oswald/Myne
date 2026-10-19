@@ -20,6 +20,8 @@ cd examples/basic
 cd out/tex && latexmk -pdf -interaction=nonstopmode sample.tex
 ```
 
+To render and compile all example projects, run `make pdfs` from the repository root. This produces `sample.pdf`, `main.pdf`, and `rpithes.pdf` in the respective `examples/*/out/tex/` directories.
+
 Generated pages are under `out/html/`, and compile-ready TeX plus local assets are under `out/tex/`. `-f html`, `-f tex`, or `-f both` selects which directory is generated. `--watch` rebuilds on source and asset changes. `--serve` implies watch mode and serves HTML at `http://127.0.0.1:8000/`, with automatic browser refresh. Use `--port N` to change the port.
 
 Run `myne [-i root|project-directory] [-f html|tex|both] [-o outputDir] [-s plain|verso|hutter|custom.css] [--config file] [--watch] [--serve] [--port N]`. The root and custom CSS paths are relative to the manifest directory. `bibliography` accepts a `.bib` path or an array of paths. `commandMap` performs literal replacements for HTML rendering only. Myne processes Lean source text without invoking the Lean elaborator. For HTML, unsupported LaTeX commands and their braced arguments are omitted.
@@ -143,3 +145,11 @@ comments and parse tex content inside of them.
 Myne projects are structured as inclusion (dependency) trees of `.tex` and `.lean` files. Dependencies are made with `\input{...}`, `\bibliography{...}`, and `\includegraphics{}` in tex and lean files. Note that this dependency tree is only enforced for rendering purposes, and not for Lean's module system, which may import files that are outside of this tree.
 
 If the root file is a latex file, it should contain a document class command with a title. If the root file is a lean file, its module doc should contain a top level heading `# ...` that represents the title of the document.
+
+
+## Annotated Lean declarations
+
+Attached Lean doc comments accept `@name`, `@nl`, `@formula`, and `@proof` fields. `@name` supplies the declaration title; `@nl` supplies its natural-language statement and is the default prose field; `@formula` supplies a display formula; and `@proof` supplies a natural-language proof for lemmas and theorems. Fields begin on their own line and continue until the next field. See `examples/annotations/main.lean` for a complete example.
+
+
+For Lean-root projects, `texTemplate` can name a TeX root template and `texClass` can name a local document class. The template must contain `{{MYNE_CONTENT}}` where the rendered Lean document belongs and `{{MYNE_THEOREM_SETUP}}` in its preamble. Myne follows the template's `\input` and `\include` references and writes the rendered template using the template's filename.

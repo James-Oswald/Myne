@@ -77,9 +77,9 @@ static int nbibs, ncites;
 static Mapping maps[64];
 static int nmaps;
 static char basedir[PATH_MAX], output[PATH_MAX], config_path[PATH_MAX];
-static char *root, *format, *style, *bibcfg[64];
+static char *root, *format, *style, *tex_template, *tex_class, *bibcfg[64];
 static int nbibcfg;
-static int live, port = 8000, failed, root_index;
+static int live, port = 8000, failed, root_index, tex_template_index = -1, tex_class_index = -1;
 static volatile unsigned long epoch;
 static pthread_mutex_t translation_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t epoch_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -148,6 +148,154 @@ static const char *lean_kind_name(int kind) {
 static const char *lean_environment(int kind) {
     const char *names[] = {NULL, "definition", "lemma", "theorem"};
     return names[kind];
+}
+
+static void addn(Buf *b, const char *s, size_t n);
+static void add(Buf *b, const char *s);
+static void ch(Buf *b, char c);
+
+typedef struct {
+    Buf name, nl, formula, proof, plain;
+    int annotated;
+} LeanDoc;
+
+static void lean_doc_free(LeanDoc *doc) {
+    free(doc->name.s);
+    free(doc->nl.s);
+    free(doc->formula.s);
+    free(doc->proof.s);
+    free(doc->plain.s);
+    memset(doc, 0, sizeof(*doc));
+}
+
+static int lean_doc_tag(const char *s, size_t n, const char **tag, size_t *tag_len,
+                        size_t *value_start) {
+    size_t i = 0;
+    while (i < n && (s[i] == ' ' || s[i] == '\t')) {
+        i++;
+    }
+    if (i < n && s[i] == '*') {
+        i++;
+        if (i < n && s[i] == ' ') {
+            i++;
+        }
+        while (i < n && (s[i] == ' ' || s[i] == '\t')) {
+            i++;
+        }
+    }
+    if (i >= n || s[i] != '@') {
+        return 0;
+    }
+    size_t begin = ++i;
+    while (i < n && isalpha((unsigned char)s[i])) {
+        i++;
+    }
+    size_t len = i - begin;
+    if (!((len == 4 && !memcmp(s + begin, "name", 4)) ||
+          (len == 2 && !memcmp(s + begin, "nl", 2)) ||
+          (len == 7 && !memcmp(s + begin, "formula", 7)) ||
+          (len == 5 && !memcmp(s + begin, "proof", 5)))) {
+        return 0;
+    }
+    while (i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == ':')) {
+        i++;
+    }
+    *tag = s + begin;
+    *tag_len = len;
+    *value_start = i;
+    return 1;
+}
+
+static void lean_doc_append(Buf *b, const char *s, size_t n) {
+    while (n && isspace((unsigned char)*s)) {
+        s++;
+        n--;
+    }
+    while (n && isspace((unsigned char)s[n - 1])) {
+        n--;
+    }
+    if (n) {
+        if (b->n && b->s[b->n - 1] != '\n') {
+            ch(b, '\n');
+        }
+        addn(b, s, n);
+        ch(b, '\n');
+    }
+}
+
+static size_t lean_doc_trimmed_len(const Buf *b) {
+    size_t n = b->n;
+    while (n && isspace((unsigned char)b->s[n - 1])) {
+        n--;
+    }
+    return n;
+}
+
+static LeanDoc lean_doc_parse(const char *s, size_t n) {
+    LeanDoc doc = {0};
+    Buf *field = &doc.plain;
+    size_t i = 0;
+    while (i < n) {
+        size_t end = i;
+        while (end < n && s[end] != '\n') {
+            end++;
+        }
+        const char *tag = NULL;
+        size_t tag_len = 0, value_start = 0;
+        if (lean_doc_tag(s + i, end - i, &tag, &tag_len, &value_start)) {
+            doc.annotated = 1;
+            if (tag_len == 4) {
+                field = &doc.name;
+                lean_doc_append(field, s + i + value_start, end - i - value_start);
+                field = NULL;
+            } else {
+                field = tag_len == 2 ? &doc.nl : tag_len == 7 ? &doc.formula : &doc.proof;
+                lean_doc_append(field, s + i + value_start, end - i - value_start);
+            }
+        } else {
+            if (!field) {
+                field = &doc.plain;
+            }
+            lean_doc_append(field, s + i, end - i);
+        }
+        i = end < n ? end + 1 : end;
+    }
+    return doc;
+}
+
+static void lean_doc_body(Buf *b, LeanDoc *doc, int kind, int for_tex) {
+    Buf *natural = doc->nl.n ? &doc->nl : &doc->plain;
+    if (natural->n) {
+        addn(b, natural->s, natural->n);
+    }
+    if (doc->formula.n) {
+        size_t formula_len = lean_doc_trimmed_len(&doc->formula);
+        if (b->n && b->s[b->n - 1] != '\n') {
+            ch(b, '\n');
+        }
+        ch(b, '\n');
+        if (formula_len < 2 || strncmp(doc->formula.s, "$$", 2)) {
+            add(b, "$$");
+        }
+        addn(b, doc->formula.s, formula_len);
+        if (formula_len < 2 || strncmp(doc->formula.s + formula_len - 2, "$$", 2)) {
+            add(b, "$$");
+        }
+        add(b, "\n\n");
+    }
+    if (doc->proof.n && (kind == LEAN_LEMMA || kind == LEAN_THEOREM)) {
+        if (for_tex) {
+            add(b, "\\begin{proof}\n");
+        } else {
+            add(b, "\\textit{Proof.} ");
+        }
+        addn(b, doc->proof.s, doc->proof.n);
+        if (for_tex) {
+            add(b, "\n\\end{proof}\n");
+        } else {
+            add(b, "\n");
+        }
+    }
 }
 
 static void die(const char *fmt, ...) {
@@ -635,6 +783,10 @@ static void load_config(const char *path) {
             free(v);
         } else if (!strcmp(key, "style")) {
             style = unquote(value);
+        } else if (!strcmp(key, "texTemplate")) {
+            tex_template = unquote(value);
+        } else if (!strcmp(key, "texClass")) {
+            tex_class = unquote(value);
         } else if (!strcmp(key, "bibliography")) {
             if (*value == '[') {
                 char *q = value + 1;
@@ -782,20 +934,37 @@ static void flatten(int id, int depth) {
             code_end = stop ? (size_t)(stop - s) : n;
             if (code_end > begin) {
                 int declaration = lean_kind(s + begin, code_end - begin);
-                const char *name = lean_kind_name(declaration);
-                segment(SEG_BOX_OPEN, name, strlen(name));
+                const char *kind_name = lean_kind_name(declaration);
+                LeanDoc doc = lean_doc_parse(s + start, j - start);
+                const char *title = doc.name.n ? doc.name.s : kind_name;
+                Buf label = {0};
+                add(&label, kind_name);
+                ch(&label, '|');
+                add(&label, title);
+                segment(SEG_BOX_OPEN, label.s, label.n);
+                free(label.s);
+                Buf body = {0};
+                if (doc.annotated) {
+                    lean_doc_body(&body, &doc, declaration, 0);
+                } else {
+                    addn(&body, s + start, j - start);
+                }
+                expand_text(f->rel, body.s ? body.s : "", body.n, depth);
+                free(body.s);
+                lean_doc_free(&doc);
             }
         }
-        Buf body = {0};
-        markdown_tex(&body, s + start, j - start, id == root_index);
-        expand_text(f->rel, body.s ? body.s : "", body.n, depth);
-        free(body.s);
-        i = j + 2;
         if (kind == '-' && code_end > begin) {
             segment(SEG_CODE, s + begin, code_end - begin);
             segment(SEG_BOX_CLOSE, "", 0);
             i = code_end;
+        } else {
+            Buf body = {0};
+            markdown_tex(&body, s + start, j - start, id == root_index);
+            expand_text(f->rel, body.s ? body.s : "", body.n, depth);
+            free(body.s);
         }
+        i = j + 2;
     }
 }
 
@@ -882,18 +1051,34 @@ static void translate_lean(File *f, int isroot) {
             if (i > begin) {
                 int declaration = lean_kind(s + begin, i - begin);
                 const char *environment = lean_environment(declaration);
+                LeanDoc doc = lean_doc_parse(s + start, j - start);
                 if (environment) {
                     add(&b, "\n\\begin{");
                     add(&b, environment);
-                    add(&b, "}\n");
+                    if (doc.name.n) {
+                        size_t name_len = lean_doc_trimmed_len(&doc.name);
+                        add(&b, "}[");
+                        addn(&b, doc.name.s, name_len);
+                        add(&b, "]\n");
+                    } else {
+                        add(&b, "}\n");
+                    }
                     f->has_boxes = 1;
                 }
-                markdown_tex(&b, s + start, j - start, isroot);
+                if (doc.annotated) {
+                    Buf body = {0};
+                    lean_doc_body(&body, &doc, declaration, 1);
+                    markdown_tex(&b, body.s ? body.s : "", body.n, isroot);
+                    free(body.s);
+                } else {
+                    markdown_tex(&b, s + start, j - start, isroot);
+                }
                 if (environment) {
                     add(&b, "\n\\end{");
                     add(&b, environment);
                     add(&b, "}\n");
                 }
+                lean_doc_free(&doc);
                 continue;
             }
         }
@@ -1756,6 +1941,51 @@ static void theorem_setup(Buf *b) {
            "\\makeatother\n");
 }
 
+static char *replace_once(const char *source, const char *needle, const char *value, int *found) {
+    const char *at = strstr(source, needle);
+    Buf b = {0};
+    if (!at) {
+        if (found) {
+            *found = 0;
+        }
+        return xstrdup(source);
+    }
+    if (found) {
+        *found = 1;
+    }
+    addn(&b, source, at - source);
+    add(&b, value);
+    add(&b, at + strlen(needle));
+    return b.s;
+}
+
+static char *remove_root_title(const char *source) {
+    const char *title = strstr(source, "\\title");
+    if (!title) {
+        return xstrdup(source);
+    }
+    size_t pos = (size_t)(title - source) + strlen("\\title");
+    char *arg = NULL;
+    if (!arg_at(source, strlen(source), &pos, &arg)) {
+        return xstrdup(source);
+    }
+    free(arg);
+    while (source[pos] && isspace((unsigned char)source[pos])) {
+        pos++;
+    }
+    if (strncmp(source + pos, "\\maketitle", strlen("\\maketitle"))) {
+        return xstrdup(source);
+    }
+    pos += strlen("\\maketitle");
+    while (source[pos] == '\n' || source[pos] == '\r') {
+        pos++;
+    }
+    Buf b = {0};
+    addn(&b, source, title - source);
+    add(&b, source + pos);
+    return b.s;
+}
+
 static void write_tex(const char *dir) {
     mkdirs(dir);
     int has_boxes = 0;
@@ -1766,7 +1996,32 @@ static void write_tex(const char *dir) {
         File *f = &files[i];
         char *rel = tex_name(f->rel), *path = join(dir, rel);
         Buf b = {0};
-        if (i == root_index && f->lean) {
+        if (i == root_index && f->lean && tex_template_index >= 0) {
+            add(&b, f->tex);
+        } else if (i == tex_template_index && tex_template_index >= 0) {
+            int content_found = 0, setup_found = 0;
+            char *content = remove_root_title(files[root_index].tex);
+            char *with_content = replace_once(f->data, "{{MYNE_CONTENT}}", content, &content_found);
+            Buf setup = {0};
+            if (has_boxes) {
+                theorem_setup(&setup);
+            }
+            char *complete = replace_once(with_content, "{{MYNE_THEOREM_SETUP}}",
+                                          setup.s ? setup.s : "", &setup_found);
+            if (!content_found) {
+                die("TeX template is missing {{MYNE_CONTENT}}: %s", f->rel);
+            }
+            if (!setup_found) {
+                die("TeX template is missing {{MYNE_THEOREM_SETUP}}: %s", f->rel);
+            }
+            add(&b, complete);
+            free(content);
+            free(with_content);
+            free(complete);
+            free(setup.s);
+        } else if (i == tex_class_index && tex_class_index >= 0) {
+            add(&b, f->data);
+        } else if (i == root_index && f->lean) {
             add(&b, "\\documentclass{article}\n\\usepackage{amsmath,amssymb,natbib}\n");
             if (has_boxes) {
                 theorem_setup(&b);
@@ -1928,6 +2183,32 @@ static int build(void) {
     if (failed || root_index < 0) {
         return -1;
     }
+    tex_template_index = tex_class_index = -1;
+    if (strcmp(format, "html") && tex_template && *tex_template) {
+        char *path = join(basedir, tex_template);
+        char *template_rel = project_rel(path);
+        free(path);
+        if (!template_rel) {
+            die("TeX template is missing or outside the project: %s", tex_template);
+        } else {
+            tex_template_index = gather(template_rel);
+            free(template_rel);
+        }
+    }
+    if (strcmp(format, "html") && tex_class && *tex_class) {
+        char *path = join(basedir, tex_class);
+        char *class_rel = project_rel(path);
+        free(path);
+        if (!class_rel) {
+            die("TeX class is missing or outside the project: %s", tex_class);
+        } else {
+            tex_class_index = gather(class_rel);
+            free(class_rel);
+        }
+    }
+    if (failed) {
+        return -1;
+    }
     translate_parallel();
     flatten(root_index, 0);
     if (failed) {
@@ -1946,10 +2227,13 @@ static int build(void) {
                                       : !strcmp(kind, "lemma")   ? "Lemma"
                                       : !strcmp(kind, "theorem") ? "Theorem"
                                                                  : "Code";
+                const char *sep = strchr(kind, '|');
+                size_t kind_len = sep ? (size_t)(sep - kind) : strlen(kind);
+                const char *title = sep ? sep + 1 : heading;
                 add(&pages[current].body, "<div class=\"lean-block ");
-                add(&pages[current].body, kind);
+                addn(&pages[current].body, kind, kind_len);
                 add(&pages[current].body, "\"><header>");
-                add(&pages[current].body, heading);
+                escape(&pages[current].body, title);
                 add(&pages[current].body, "</header><div class=\"lean-doc\">");
             } else if (segs[i].kind == SEG_CODE) {
                 add(&pages[current].body, "</div>");

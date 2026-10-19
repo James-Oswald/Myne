@@ -20,7 +20,21 @@ src/katex_assets.inc: tools/embed_katex.py
 myne: src/myne.c src/app_assets.inc src/katex_assets.inc
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(LDLIBS)
 
+pdfs: basic-pdf annotations-pdf thesis-pdf
+
+basic-pdf: myne
+	./myne -i examples/basic -f both
+	cd examples/basic/out/tex && latexmk -pdf -quiet -interaction=nonstopmode -halt-on-error sample.tex
+
+annotations-pdf: myne
+	./myne -i examples/annotations -f both
+	cd examples/annotations/out/tex && latexmk -pdf -quiet -interaction=nonstopmode -halt-on-error main.tex
+
+thesis-pdf: myne
+	./myne -i examples/thesis -f both
+	cd examples/thesis/out/tex && latexmk -pdf -quiet -interaction=nonstopmode -halt-on-error rpithes.tex
+
 clean:
 	rm -f myne src/app_assets.inc src/katex_assets.inc
 
-.PHONY: all clean
+.PHONY: all pdfs basic-pdf annotations-pdf thesis-pdf clean
