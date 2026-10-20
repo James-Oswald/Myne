@@ -52,9 +52,9 @@ typedef struct {
 } Segment;
 
 typedef struct {
-    char *title, *slug;
+    char *title, *slug, *number;
     Buf body, notes;
-    int part;
+    int part, heading;
 } Page;
 
 typedef struct {
@@ -77,9 +77,13 @@ static int nbibs, ncites;
 static Mapping maps[64];
 static int nmaps;
 static char basedir[PATH_MAX], output[PATH_MAX], config_path[PATH_MAX];
-static char *root, *format, *style, *tex_template, *tex_class, *bibcfg[64];
+static char *root, *format, *style, *tex_template, *tex_class, *page_heading, *bibcfg[64];
 static int nbibcfg;
 static int live, port = 8000, failed, root_index, tex_template_index = -1, tex_class_index = -1;
+static int dark_mode_toggle, page_heading_level;
+static int chapter_number, section_number, subsection_number, subsubsection_number;
+static int chapter_active, statement_number;
+static char statement_scope[64];
 static volatile unsigned long epoch;
 static pthread_mutex_t translation_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t epoch_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -129,10 +133,18 @@ static int lean_kind(const char *s, size_t n) {
             break;
         }
     }
-    const char *words[] = {"def", "lemma", "theorem"};
-    for (int kind = LEAN_DEF; kind <= LEAN_THEOREM; kind++) {
-        size_t len = strlen(words[kind - LEAN_DEF]);
-        if (i + len <= n && !memcmp(s + i, words[kind - LEAN_DEF], len) &&
+    const char *definitions[] = {"def", "abbrev", "opaque", "structure", "class", "inductive"};
+    for (size_t j = 0; j < sizeof(definitions) / sizeof(*definitions); j++) {
+        size_t len = strlen(definitions[j]);
+        if (i + len <= n && !memcmp(s + i, definitions[j], len) &&
+            (i + len == n || isspace((unsigned char)s[i + len]))) {
+            return LEAN_DEF;
+        }
+    }
+    const char *propositions[] = {"lemma", "theorem"};
+    for (int kind = LEAN_LEMMA; kind <= LEAN_THEOREM; kind++) {
+        size_t len = strlen(propositions[kind - LEAN_LEMMA]);
+        if (i + len <= n && !memcmp(s + i, propositions[kind - LEAN_LEMMA], len) &&
             (i + len == n || isspace((unsigned char)s[i + len]))) {
             return kind;
         }
@@ -407,6 +419,20 @@ static char *unquote(const char *s) {
         s++;
     }
     return b.s ? b.s : xstrdup("");
+}
+
+static int config_bool(const char *value, int *result) {
+    char *v = unquote(value);
+    int valid = 1;
+    if (!strcasecmp(v, "true") || !strcmp(v, "1")) {
+        *result = 1;
+    } else if (!strcasecmp(v, "false") || !strcmp(v, "0")) {
+        *result = 0;
+    } else {
+        valid = 0;
+    }
+    free(v);
+    return valid;
 }
 
 static int mkdirs(const char *path) {
@@ -728,6 +754,7 @@ static void clear_project(void) {
     for (int i = 0; i < npages; i++) {
         free(pages[i].title);
         free(pages[i].slug);
+        free(pages[i].number);
         free(pages[i].body.s);
         free(pages[i].notes.s);
         memset(&pages[i], 0, sizeof(Page));
@@ -740,6 +767,9 @@ static void clear_project(void) {
     }
     nfiles = nsegs = npages = nbibs = ncites = nfoot = 0;
     current = part = 0;
+    chapter_number = section_number = subsection_number = subsubsection_number = 0;
+    chapter_active = statement_number = 0;
+    statement_scope[0] = 0;
     bib_page = -1;
     failed = 0;
 }
@@ -783,6 +813,12 @@ static void load_config(const char *path) {
             free(v);
         } else if (!strcmp(key, "style")) {
             style = unquote(value);
+        } else if (!strcmp(key, "darkModeToggle")) {
+            if (!config_bool(value, &dark_mode_toggle)) {
+                die("darkModeToggle must be true or false");
+            }
+        } else if (!strcmp(key, "pageHeading")) {
+            page_heading = unquote(value);
         } else if (!strcmp(key, "texTemplate")) {
             tex_template = unquote(value);
         } else if (!strcmp(key, "texClass")) {
@@ -826,7 +862,7 @@ static void segment(int kind, const char *s, size_t n) {
     segs[nsegs++].s = slice(s, n);
 }
 
-static void markdown_tex(Buf *b, const char *s, size_t n, int isroot);
+static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_heading_seen);
 static void flatten(int id, int depth);
 
 /* Expand includes at their source location to retain document order. */
@@ -896,6 +932,7 @@ static void flatten(int id, int depth) {
         expand_text(f->rel, s, n, depth);
         return;
     }
+    int top_heading_seen = 0;
     for (size_t i = 0; i < n;) {
         int doc =
             i + 3 <= n && s[i] == '/' && s[i + 1] == '-' && (s[i + 2] == '!' || s[i + 2] == '-');
@@ -936,11 +973,14 @@ static void flatten(int id, int depth) {
                 int declaration = lean_kind(s + begin, code_end - begin);
                 const char *kind_name = lean_kind_name(declaration);
                 LeanDoc doc = lean_doc_parse(s + start, j - start);
-                const char *title = doc.name.n ? doc.name.s : kind_name;
                 Buf label = {0};
                 add(&label, kind_name);
                 ch(&label, '|');
-                add(&label, title);
+                if (doc.name.n) {
+                    addn(&label, doc.name.s, lean_doc_trimmed_len(&doc.name));
+                } else {
+                    add(&label, kind_name);
+                }
                 segment(SEG_BOX_OPEN, label.s, label.n);
                 free(label.s);
                 Buf body = {0};
@@ -960,7 +1000,7 @@ static void flatten(int id, int depth) {
             i = code_end;
         } else {
             Buf body = {0};
-            markdown_tex(&body, s + start, j - start, id == root_index);
+            markdown_tex(&body, s + start, j - start, id == root_index, &top_heading_seen);
             expand_text(f->rel, body.s ? body.s : "", body.n, depth);
             free(body.s);
         }
@@ -969,7 +1009,7 @@ static void flatten(int id, int depth) {
 }
 
 /* Convert Markdown headings into the common TeX and HTML heading model. */
-static void markdown_tex(Buf *b, const char *s, size_t n, int isroot) {
+static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_heading_seen) {
     for (size_t i = 0; i < n;) {
         size_t e = i;
         while (e < n && s[e] != '\n') {
@@ -984,10 +1024,15 @@ static void markdown_tex(Buf *b, const char *s, size_t n, int isroot) {
             k++;
         }
         if (k > h && k < e && s[k] == ' ') {
-            const char *cmd = k - h == 1 ? (isroot ? "title" : "section")
+            const char *cmd = k - h == 1 ? (!*top_heading_seen && isroot ? "title"
+                                             : !*top_heading_seen        ? "chapter"
+                                                                        : "section")
                                          : (k - h == 2   ? "section"
                                             : k - h == 3 ? "subsection"
                                                          : "subsubsection");
+            if (k - h == 1) {
+                *top_heading_seen = 1;
+            }
             size_t tail = e;
             while (tail > k + 1 && isspace((unsigned char)s[tail - 1])) {
                 tail--;
@@ -1013,6 +1058,7 @@ static void translate_lean(File *f, int isroot) {
     const char *s = f->data;
     size_t n = strlen(s);
     Buf b = {0};
+    int top_heading_seen = 0;
     for (size_t i = 0; i < n;) {
         int doc =
             i + 3 <= n && s[i] == '/' && s[i + 1] == '-' && (s[i + 2] == '!' || s[i + 2] == '-');
@@ -1068,10 +1114,10 @@ static void translate_lean(File *f, int isroot) {
                 if (doc.annotated) {
                     Buf body = {0};
                     lean_doc_body(&body, &doc, declaration, 1);
-                    markdown_tex(&b, body.s ? body.s : "", body.n, isroot);
+                    markdown_tex(&b, body.s ? body.s : "", body.n, isroot, &top_heading_seen);
                     free(body.s);
                 } else {
-                    markdown_tex(&b, s + start, j - start, isroot);
+                    markdown_tex(&b, s + start, j - start, isroot, &top_heading_seen);
                 }
                 if (environment) {
                     add(&b, "\n\\end{");
@@ -1082,7 +1128,7 @@ static void translate_lean(File *f, int isroot) {
                 continue;
             }
         }
-        markdown_tex(&b, s + start, j - start, isroot);
+        markdown_tex(&b, s + start, j - start, isroot, &top_heading_seen);
     }
     f->tex = b.s ? b.s : xstrdup("");
 }
@@ -1331,18 +1377,96 @@ static char *slug(int id, const char *kind) {
     return xstrdup(tmp);
 }
 
-static void new_page(const char *title, int ispart) {
+static const char *heading_name(int type) {
+    const char *names[] = {"introduction", "title", "part", "chapter", "section",
+                           "subsection", "subsubsection", "paragraph"};
+    return type >= 0 && type < (int)(sizeof(names) / sizeof(*names)) ? names[type] : "page";
+}
+
+static void set_statement_scope(const char *number) {
+    snprintf(statement_scope, sizeof(statement_scope), "%s", number ? number : "");
+    statement_number = 0;
+}
+
+static void number_heading(Buf *number, int type) {
+    char value[64] = {0};
+    if (type == 2) {
+        chapter_active = 0;
+        section_number = subsection_number = subsubsection_number = 0;
+        set_statement_scope("");
+    } else if (type == 3) {
+        chapter_number++;
+        chapter_active = 1;
+        section_number = subsection_number = subsubsection_number = 0;
+        snprintf(value, sizeof(value), "%d", chapter_number);
+        set_statement_scope(value);
+    } else if (type == 4) {
+        section_number++;
+        subsection_number = subsubsection_number = 0;
+        if (chapter_active) {
+            snprintf(value, sizeof(value), "%d.%d", chapter_number, section_number);
+        } else {
+            snprintf(value, sizeof(value), "%d", section_number);
+        }
+        set_statement_scope(value);
+    } else if (type == 5) {
+        subsection_number++;
+        subsubsection_number = 0;
+        if (chapter_active && section_number) {
+            snprintf(value, sizeof(value), "%d.%d.%d", chapter_number, section_number,
+                     subsection_number);
+        } else if (chapter_active) {
+            snprintf(value, sizeof(value), "%d.%d", chapter_number, subsection_number);
+        } else if (section_number) {
+            snprintf(value, sizeof(value), "%d.%d", section_number, subsection_number);
+        } else {
+            snprintf(value, sizeof(value), "%d", subsection_number);
+        }
+    } else if (type == 6) {
+        subsubsection_number++;
+        if (chapter_active && section_number) {
+            snprintf(value, sizeof(value), "%d.%d.%d.%d", chapter_number, section_number,
+                     subsection_number, subsubsection_number);
+        } else if (chapter_active) {
+            snprintf(value, sizeof(value), "%d.%d.%d", chapter_number, subsection_number,
+                     subsubsection_number);
+        } else if (section_number) {
+            snprintf(value, sizeof(value), "%d.%d.%d", section_number, subsection_number,
+                     subsubsection_number);
+        } else {
+            snprintf(value, sizeof(value), "%d.%d", subsection_number, subsubsection_number);
+        }
+    }
+    if (*value) {
+        add(number, value);
+    }
+}
+
+static void next_statement_number(Buf *number) {
+    char value[96];
+    statement_number++;
+    if (*statement_scope) {
+        snprintf(value, sizeof(value), "%s.%d", statement_scope, statement_number);
+    } else {
+        snprintf(value, sizeof(value), "%d", statement_number);
+    }
+    add(number, value);
+}
+
+static void new_page(const char *title, int heading, const char *number) {
     if (npages >= MAX_PAGES) {
         die("too many pages");
         return;
     }
-    if (ispart) {
+    if (heading == 2) {
         part++;
     }
     Page *p = &pages[npages];
     p->title = xstrdup(title);
-    p->slug = npages ? slug(npages, ispart ? "part" : "chapter") : xstrdup("index.html");
+    p->slug = npages ? slug(npages, heading_name(heading)) : xstrdup("index.html");
+    p->number = number && *number ? xstrdup(number) : NULL;
     p->part = part;
+    p->heading = heading;
     current = npages++;
 }
 
@@ -1542,7 +1666,10 @@ static void text_html(const char *s) {
             int type = structural(cmd);
             if (!strcmp(cmd, "appendix")) {
                 inline_html(&pages[current].body, s + start, i - start, 0);
-                new_page("Appendix", 1);
+                Buf number = {0};
+                number_heading(&number, 2);
+                new_page("Appendix", 2, number.s);
+                free(number.s);
                 i = k;
                 start = i;
                 free(cmd);
@@ -1556,15 +1683,31 @@ static void text_html(const char *s) {
                     if (type == 1) {
                         free(doc_title);
                         doc_title = xstrdup(arg);
-                    } else if (type == 2 || type == 3) {
-                        new_page(arg, type == 2);
                     } else {
-                        char tag[32];
-                        snprintf(tag, sizeof(tag), "<h%d>", type - 2);
-                        add(&pages[current].body, tag);
-                        inline_html(&pages[current].body, arg, strlen(arg), 0);
-                        snprintf(tag, sizeof(tag), "</h%d>", type - 2);
-                        add(&pages[current].body, tag);
+                        Buf number = {0};
+                        number_heading(&number, type);
+                        if (type >= 2 && type <= page_heading_level) {
+                            new_page(arg, type, number.s);
+                        } else {
+                            char tag[32];
+                            int level = type - page_heading_level + 1;
+                            if (level < 2) {
+                                level = 2;
+                            } else if (level > 6) {
+                                level = 6;
+                            }
+                            snprintf(tag, sizeof(tag), "<h%d>", level);
+                            add(&pages[current].body, tag);
+                            if (number.n) {
+                                add(&pages[current].body, "<span class=heading-number>");
+                                escape(&pages[current].body, number.s);
+                                add(&pages[current].body, "</span> ");
+                            }
+                            inline_html(&pages[current].body, arg, strlen(arg), 0);
+                            snprintf(tag, sizeof(tag), "</h%d>", level);
+                            add(&pages[current].body, tag);
+                        }
+                        free(number.s);
                     }
                     free(arg);
                     i = p;
@@ -2069,7 +2212,16 @@ static void write_tex(const char *dir) {
 }
 
 static void nav_html(Buf *b, int active) {
-    add(b, "<nav><a href=\"index.html\">");
+    int root_heading = 7;
+    for (int i = 1; i < npages; i++) {
+        if (pages[i].heading >= 2 && pages[i].heading < root_heading) {
+            root_heading = pages[i].heading;
+        }
+    }
+    if (root_heading == 7) {
+        root_heading = page_heading_level;
+    }
+    add(b, "<nav aria-label=\"Table of contents\"><a class=nav-title href=\"index.html\">");
     escape(b, doc_title ? doc_title : "Myne");
     add(b, "</a>");
     for (int i = 0; i < npages; i++) {
@@ -2080,14 +2232,33 @@ static void nav_html(Buf *b, int active) {
         if (i == active) {
             add(b, "active ");
         }
-        if (i && !strncmp(pages[i].slug, "part", 4)) {
+        int depth = pages[i].heading - root_heading;
+        if (depth < 0) {
+            depth = 0;
+        } else if (depth > 4) {
+            depth = 4;
+        }
+        char nav_class[80];
+        snprintf(nav_class, sizeof(nav_class), "nav-entry nav-depth-%d heading-%s ", depth,
+                 heading_name(pages[i].heading));
+        add(b, nav_class);
+        if (pages[i].heading == 2) {
             add(b, "part");
         }
         add(b, "\" href=\"");
         escape(b, pages[i].slug);
         add(b, "\">");
+        if (pages[i].number) {
+            add(b, "<span class=heading-number>");
+            escape(b, pages[i].number);
+            add(b, "</span> ");
+        }
         escape(b, pages[i].title);
         add(b, "</a>");
+    }
+    if (dark_mode_toggle) {
+        add(b, "<button class=theme-toggle type=button aria-label=\"Toggle dark mode\" "
+               "aria-pressed=\"false\">Dark mode</button>");
     }
     add(b, "</nav>");
 }
@@ -2117,10 +2288,21 @@ static void write_html(const char *dir) {
         Buf html = {0};
         add(&html, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta "
                    "name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>");
+        if (pages[i].number) {
+            escape(&html, pages[i].number);
+            ch(&html, ' ');
+        }
         escape(&html, pages[i].title);
         add(&html, " — ");
         escape(&html, doc_title ? doc_title : "Myne");
-        add(&html, "</title><link rel=\"stylesheet\" href=\"style.css\"><link rel=\"stylesheet\" "
+        add(&html, "</title>");
+        if (dark_mode_toggle) {
+            add(&html,
+                "<script>try{let t=localStorage.getItem('myne-theme');if(t!=='light'&&t!=='dark')"
+                "t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';"
+                "document.documentElement.dataset.theme=t}catch(_){}</script>");
+        }
+        add(&html, "<link rel=\"stylesheet\" href=\"style.css\"><link rel=\"stylesheet\" "
                    "href=\"katex/katex.min.css\">");
         if (custom) {
             add(&html, "<link rel=\"stylesheet\" href=\"custom.css\">");
@@ -2132,15 +2314,25 @@ static void write_html(const char *dir) {
         add(&html, live ? "\" data-live=\"1\">" : "\" data-live=\"0\">");
         nav_html(&html, i);
         add(&html, "<main><h1>");
+        if (pages[i].number) {
+            add(&html, "<span class=heading-number>");
+            escape(&html, pages[i].number);
+            add(&html, "</span> ");
+        }
         escape(&html, pages[i].title);
         add(&html, "</h1>");
         addn(&html, pages[i].body.s ? pages[i].body.s : "", pages[i].body.n);
-        if (i && !strncmp(pages[i].slug, "part", 4)) {
+        if (pages[i].heading == 2) {
             add(&html, "<ul class=part-list>");
             for (int j = i + 1; j < npages && pages[j].part == pages[i].part; j++) {
                 add(&html, "<li><a href=\"");
                 escape(&html, pages[j].slug);
                 add(&html, "\">");
+                if (pages[j].number) {
+                    add(&html, "<span class=heading-number>");
+                    escape(&html, pages[j].number);
+                    add(&html, "</span> ");
+                }
                 escape(&html, pages[j].title);
                 add(&html, "</a></li>");
             }
@@ -2219,21 +2411,42 @@ static int build(void) {
         if (failed) {
             return -1;
         }
-        new_page("Introduction", 0);
+        new_page("Introduction", 0, NULL);
         for (int i = 0; i < nsegs; i++) {
             if (segs[i].kind == SEG_BOX_OPEN) {
                 const char *kind = segs[i].s;
-                const char *heading = !strcmp(kind, "def")       ? "Definition"
-                                      : !strcmp(kind, "lemma")   ? "Lemma"
-                                      : !strcmp(kind, "theorem") ? "Theorem"
-                                                                 : "Code";
                 const char *sep = strchr(kind, '|');
                 size_t kind_len = sep ? (size_t)(sep - kind) : strlen(kind);
+                int is_def = kind_len == 3 && !memcmp(kind, "def", 3);
+                int is_lemma = kind_len == 5 && !memcmp(kind, "lemma", 5);
+                int is_theorem = kind_len == 7 && !memcmp(kind, "theorem", 7);
+                const char *heading = is_def       ? "Definition"
+                                      : is_lemma   ? "Lemma"
+                                      : is_theorem ? "Theorem"
+                                                   : "Code";
                 const char *title = sep ? sep + 1 : heading;
                 add(&pages[current].body, "<div class=\"lean-block ");
                 addn(&pages[current].body, kind, kind_len);
                 add(&pages[current].body, "\"><header>");
-                escape(&pages[current].body, title);
+                if (is_def || is_lemma || is_theorem) {
+                    Buf number = {0};
+                    next_statement_number(&number);
+                    add(&pages[current].body, "<span class=statement-label>");
+                    add(&pages[current].body, heading);
+                    ch(&pages[current].body, ' ');
+                    escape(&pages[current].body, number.s);
+                    add(&pages[current].body, "</span>");
+                    int default_title = strlen(title) == kind_len &&
+                                        !strncasecmp(title, kind, kind_len);
+                    if (!default_title) {
+                        add(&pages[current].body, "<span class=statement-title> — ");
+                        escape(&pages[current].body, title);
+                        add(&pages[current].body, "</span>");
+                    }
+                    free(number.s);
+                } else {
+                    escape(&pages[current].body, title);
+                }
                 add(&pages[current].body, "</header><div class=\"lean-doc\">");
             } else if (segs[i].kind == SEG_CODE) {
                 add(&pages[current].body, "</div>");
@@ -2517,6 +2730,7 @@ int main(int argc, char **argv) {
     int input_is_dir = 0;
     format = xstrdup("html");
     style = xstrdup("plain");
+    page_heading = xstrdup("section");
     snprintf(output, sizeof(output), "out");
     snprintf(config_path, sizeof(config_path), "myne.toml");
     for (int i = 1; i < argc; i++) {
@@ -2554,6 +2768,9 @@ int main(int argc, char **argv) {
         snprintf(basedir, sizeof(basedir), "%s", config_abs);
         *slash = '/';
         load_config(config_abs);
+        if (failed) {
+            return 1;
+        }
     } else if (!getcwd(basedir, sizeof(basedir))) {
         perror("getcwd");
         return 1;
@@ -2610,6 +2827,11 @@ int main(int argc, char **argv) {
     if (strcmp(style, "plain") && strcmp(style, "verso") && strcmp(style, "hutter") &&
         !ends(style, ".css")) {
         die("unknown style %s", style);
+        return 1;
+    }
+    page_heading_level = structural(page_heading);
+    if (page_heading_level < 2 || page_heading_level > 6) {
+        die("pageHeading must be part, chapter, section, subsection, or subsubsection");
         return 1;
     }
     if (output[0] != '/') {

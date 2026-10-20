@@ -24,7 +24,7 @@ To render and compile all example projects, run `make pdfs` from the repository 
 
 Generated pages are under `out/html/`, and compile-ready TeX plus local assets are under `out/tex/`. `-f html`, `-f tex`, or `-f both` selects which directory is generated. `--watch` rebuilds on source and asset changes. `--serve` implies watch mode and serves HTML at `http://127.0.0.1:8000/`, with automatic browser refresh. Use `--port N` to change the port.
 
-Run `myne [-i root|project-directory] [-f html|tex|both] [-o outputDir] [-s plain|verso|hutter|custom.css] [--config file] [--watch] [--serve] [--port N]`. The root and custom CSS paths are relative to the manifest directory. `bibliography` accepts a `.bib` path or an array of paths. `commandMap` performs literal replacements for HTML rendering only. Myne processes Lean source text without invoking the Lean elaborator. For HTML, unsupported LaTeX commands and their braced arguments are omitted.
+Run `myne [-i root|project-directory] [-f html|tex|both] [-o outputDir] [-s plain|verso|hutter|custom.css] [--config file] [--watch] [--serve] [--port N]`. The root and custom CSS paths are relative to the manifest directory. `bibliography` accepts a `.bib` path or an array of paths. `pageHeading` controls the deepest heading level that starts a web page and defaults to `section`. `darkModeToggle = true` adds a persistent light/dark switch to the web navigation. `commandMap` performs literal replacements for HTML rendering only. Myne processes Lean source text without invoking the Lean elaborator. For HTML, unsupported LaTeX commands and their braced arguments are omitted.
 
 `-i` also accepts a project directory. For example, `./myne -i examples/basic --serve` loads `examples/basic/myne.toml` and serves that project's output from the repository root.
 
@@ -44,6 +44,8 @@ To use Myne from the command line, you can run `myne` command. The command will 
 - `bibliography` : Links a bibtex bibliography `.bib` file at the end of document. This is useful if root document is a `.lean` file and you dont want to add a `/-! \bibliography{...} -/` comment manually, which would otherwise be required to include the bibliography.
 - `commandMap` : A dictionary mapping unsupported LaTeX commands to their replacements for web rendering. This is useful when targeting web output and certain LaTeX commands are not supported, IE, you have a special format `.cls` file that defines custom title or section commands that would otherwise disapear on web rendering if not mapped to supported HTML equivalents.
 - `style` : Specifies a CSS style file to be used for web output. This allows customizing the appearance of the generated HTML. Built in styles are specified without the extension, while custom styles should include a path with `.css`
+- `pageHeading` : The deepest heading level that starts a new web page. Supports `part`, `chapter`, `section`, `subsection`, and `subsubsection`; defaults to `section`. The selected level and higher-level headings each start pages.
+- `darkModeToggle` : Set to `true` to add a light/dark theme button to the web navigation. The visitor's choice is shared across generated pages and saved in the browser.
 
 Arguments:
 - `-i <input-file-or-project-directory>`: Specifies a Lean4 or LaTeX root file, or loads `myne.toml` from a project directory. Defaults to the root file in the manifest.
@@ -124,12 +126,12 @@ comments and parse tex content inside of them.
 
 - When rendering tex to web, Myne should use the supported commands, and respect sectioning.
 - Sectioning for web should work as follows:
-  - Anything before the first `\part{...}` or `\chapter{...}` is considered the introduction and is rendered on the introduction page.
-  - `\part{...}` Collections of chapters in the side menu. If there is anthing between a `\part{...}` and the first `\chapter{...}`, An introduction page is created for the part, with a list of chapters.
-  - `\chapter{...}`s are their own web pages, the chapter name is used as the page title
-  - `\section{...}`s are rendered as `<h2>...</h2>`
-  - `\subsection{...}`s are rendered as `<h3>...</h3>`
-  - `\subsubsection{...}`s are rendered as `<h4>...</h4>`
+- Anything before the first page-producing heading is rendered on the introduction page.
+- By default, `\part{...}`, `\chapter{...}`, and `\section{...}` each start a web page because `pageHeading` defaults to `section`.
+- Set `pageHeading = "chapter"` to restore chapter-level page splitting, or select a deeper supported heading for smaller pages.
+- Headings below the configured page level render within the current page, beginning at `<h2>` beneath the page title.
+- In the root Lean file, the first `#` sets the document title. In an included Lean file, the first `#` becomes its chapter; later `#` headings and `##` headings become sections, and deeper Markdown headings retain that hierarchy in the side navigation.
+- Web headings use hierarchical numbers, and definitions, lemmas, and theorems share a counter scoped to the current section.
 
 - Myne supports raw CSS styling for web output, providing some default styles and allowing users to create their own. Myne ships with a set of built-in styles that can be used by specifying their names in the `style` configuration option. Built in styles include:
 - `plain` : where theorems, lemmas, and definitions are displayed in a simple round cornered box with a name.
