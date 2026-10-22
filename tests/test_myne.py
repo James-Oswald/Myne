@@ -19,6 +19,71 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 class MyneTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("lean"), "Lean 4 is required")
+    def test_elaborated_graph_resolves_notation_and_tactics_only_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text(
+                'root = "main.lean"\nformat = "html"\n[web]\n'
+                'dependencyGraph = "basic"\n'
+            )
+            (base / "main.lean").write_text(
+                '/-! # Elaborated graph -/\n'
+                '/-- @name Base -/\n'
+                'def base (n : Nat) : Nat := n + 1\n\n'
+                'notation "inc" => base\n\n'
+                '/-- @name Seed -/\n'
+                '@[simp] theorem seed : base 0 = 1 := by rfl\n\n'
+                '/-- @name Notation -/\n'
+                'theorem notation_theorem (n : Nat) : inc n = n + 1 := by rfl\n\n'
+                '/-- @name Tactic -/\n'
+                'theorem tactic_theorem : base 0 = 1 := by simp\n'
+            )
+            basic = run(cwd=base)
+            self.assertEqual(basic.returncode, 0, basic.stderr)
+            basic_graph = (base / "out/html/dependencies.html").read_text()
+            self.assertIn("Warning: syntactic dependency graph.", basic_graph)
+            self.assertIn("data-graph-page", basic_graph)
+            self.assertNotIn('data-from="0" data-to="2"', basic_graph)
+            self.assertNotIn('data-from="1" data-to="3"', basic_graph)
+
+            full = run("--elaborated-deps", cwd=base)
+            self.assertEqual(full.returncode, 0, full.stderr)
+            full_graph = (base / "out/html/dependencies.html").read_text()
+            self.assertIn('data-from="0" data-to="2"', full_graph)
+            self.assertIn('data-from="1" data-to="3"', full_graph)
+            self.assertIn("This graph uses Lean's elaborated types", full_graph)
+            self.assertNotIn("Warning: syntactic dependency graph.", full_graph)
+
+    @unittest.skipUnless(shutil.which("lean"), "Lean 4 is required")
+    def test_failed_elaboration_does_not_retry_without_source_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\nformat = "html"\n')
+            (base / "main.lean").write_text(
+                'import MyneMissingModule\n'
+                '/-! # Failure -/\n'
+                '/-- @name Example -/\n'
+                'theorem example : True := by trivial\n'
+            )
+            log = base / "watch.log"
+            with log.open("w") as stderr:
+                proc = subprocess.Popen(
+                    [str(MYNE), "--watch", "--elaborated-deps"],
+                    cwd=base, stdout=subprocess.DEVNULL, stderr=stderr,
+                )
+                try:
+                    deadline = time.monotonic() + 15
+                    while "Lean elaboration failed" not in log.read_text():
+                        self.assertIsNone(proc.poll(), "watch exited before reporting failure")
+                        self.assertLess(time.monotonic(), deadline, "Lean failure was not reported")
+                        time.sleep(0.1)
+                    time.sleep(1.2)
+                    self.assertEqual(log.read_text().count("Lean elaboration failed"), 1)
+                finally:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+
     def test_declaration_map_in_html_and_tex(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)

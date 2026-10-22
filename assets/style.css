@@ -180,6 +180,58 @@ pre {
 .page-toc h2 { margin: 0 0 0.6rem; font-size: 1rem; }
 .page-toc ul { margin: 0; padding-left: 1.2rem; }
 .page-toc li { margin: 0.3rem 0; }
+.declaration-anchor { scroll-margin-top: 5rem; }
+body[data-graph-page] { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
+body[data-graph-page] .site-header { flex: 0 0 auto; }
+.dependency-page { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; width: 100%; max-width: none; margin: 0; padding: 0.75rem 1rem 1rem; }
+.dependency-page h1 { margin: 0 0 0.35rem; font-size: 1.55rem; }
+.graph-help { max-width: none; margin: 0.15rem 0; font: 0.88rem/1.4 system-ui, sans-serif; }
+.graph-warning { margin: 0.25rem 0 0.4rem; padding: 0.5rem 0.75rem; border-left: 4px solid #b45309; border-radius: 0.2rem; background: #fff4d6; color: #593407; font: 0.88rem/1.4 system-ui, sans-serif; }
+.graph-warning code { font: 0.9em ui-monospace, monospace; }
+.dependency-toolbar { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
+.dependency-toolbar button { border: 1px solid #aeb8c4; border-radius: 0.35rem; padding: 0.4rem 0.75rem; color: inherit; background: #f8fafc; font: inherit; cursor: pointer; }
+.dependency-toolbar button:hover { background: #e8eef5; }
+.graph-legend { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; margin-left: auto; font: 0.9rem system-ui, sans-serif; }
+.graph-legend i { width: 0.8rem; height: 0.8rem; border: 1px solid; border-radius: 0.2rem; }
+.legend-definition { background: #dbeafe; border-color: #2563eb !important; }
+.legend-lemma { background: #dcfce7; border-color: #16a34a !important; }
+.legend-theorem { background: #fef3c7; border-color: #d97706 !important; }
+.dependency-scroll { flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid #c6d1dd; border-radius: 0.6rem; background: #f8fbff; }
+.dependency-graph { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; cursor: grab; }
+.dependency-edge { fill: none; stroke: #718096; stroke-width: 1.7; opacity: 0.8; vector-effect: non-scaling-stroke; pointer-events: none; }
+.dependency-arrow { fill: #59697a; }
+.dependency-link { text-decoration: none; }
+.dependency-node { cursor: grab; }
+.dependency-link[data-dragging="1"] .dependency-node { cursor: grabbing; }
+.dependency-graph[data-panning="1"] { cursor: grabbing; }
+.dependency-node rect { stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+.dependency-definition rect { fill: #dbeafe; stroke: #1d4ed8; }
+.dependency-lemma rect { fill: #dcfce7; stroke: #15803d; }
+.dependency-theorem rect { fill: #fef3c7; stroke: #b45309; }
+.dependency-link:hover .dependency-node rect,
+.dependency-link:focus .dependency-node rect { stroke-width: 3; }
+.dependency-link:hover .dependency-definition rect,
+.dependency-link:focus .dependency-definition rect { fill: #bfdbfe; }
+.dependency-link:hover .dependency-lemma rect,
+.dependency-link:focus .dependency-lemma rect { fill: #bbf7d0; }
+.dependency-link:hover .dependency-theorem rect,
+.dependency-link:focus .dependency-theorem rect { fill: #fde68a; }
+.dependency-name { fill: #17212b; text-anchor: middle; font: 600 14px system-ui, sans-serif; }
+.dependency-kind { fill: #3d4c5f; text-anchor: middle; font: 11px system-ui, sans-serif; }
+.dependency-link:focus { outline: none; }
+.dependency-link.is-active .dependency-node rect { stroke-width: 3.2; filter: brightness(0.94); }
+.dependency-link.is-dependency .dependency-node rect { stroke-width: 3; }
+.dependency-edge.is-highlighted { stroke: #2563eb; stroke-width: 3; opacity: 1; }
+.dependency-edge.is-highlighted + .dependency-edge { opacity: 1; }
+.dependency-tooltip { position: fixed; z-index: 1000; max-width: min(32rem, calc(100vw - 2rem)); max-height: min(60vh, 28rem); overflow: auto; padding: 0.8rem 1rem; border: 1px solid #64748b; border-radius: 0.5rem; background: #fff; color: #17212b; box-shadow: 0 8px 28px #0f172a40; font: 0.92rem/1.45 system-ui, sans-serif; pointer-events: none; }
+.dependency-tooltip[hidden] { display: none; }
+.dependency-tooltip-field + .dependency-tooltip-field { margin-top: 0.6rem; padding-top: 0.55rem; border-top: 1px solid #d7dee7; }
+.dependency-tooltip-field strong { display: block; margin-bottom: 0.15rem; font-size: 0.8rem; color: #475569; }
+.dependency-tooltip .katex-display { margin: 0.25rem 0; }
+:root[data-theme=dark] .dependency-tooltip { border-color: #64748b; background: #18212c; color: #e5edf5; box-shadow: 0 8px 28px #0009; }
+:root[data-theme=dark] .dependency-tooltip-field + .dependency-tooltip-field { border-color: #475569; }
+:root[data-theme=dark] .dependency-tooltip-field strong { color: #cbd5e1; }
+:root[data-theme=dark] .dependency-edge.is-highlighted { stroke: #93c5fd; }
 .katex-display { overflow: auto hidden; }
 .mobile-notes { display: none; }
 
@@ -221,6 +273,19 @@ body[data-style=hutter] .lean-code { background: transparent; }
     background: #202a35;
     border-color: #465465;
 }
+:root[data-theme=dark] .dependency-scroll { background: #161c23; border-color: #465465; }
+:root[data-theme=dark] .graph-warning { border-color: #fbbf24; background: #382b12; color: #ffebbf; }
+:root[data-theme=dark] .dependency-edge { stroke: #a8b5c3; }
+:root[data-theme=dark] .dependency-arrow { fill: #a8b5c3; }
+:root[data-theme=dark] .dependency-toolbar button { background: #202a35; border-color: #526172; }
+:root[data-theme=dark] .dependency-toolbar button:hover { background: #303c49; }
+:root[data-theme=dark] .dependency-definition rect { fill: #1e3a5f; stroke: #60a5fa; }
+:root[data-theme=dark] .dependency-lemma rect { fill: #17432a; stroke: #4ade80; }
+:root[data-theme=dark] .dependency-theorem rect { fill: #4a3513; stroke: #fbbf24; }
+:root[data-theme=dark] .dependency-link:hover .dependency-node rect,
+:root[data-theme=dark] .dependency-link:focus .dependency-node rect { filter: brightness(1.25); }
+:root[data-theme=dark] .dependency-name { fill: #e5e9ef; }
+:root[data-theme=dark] .dependency-kind { fill: #aab7c5; }
 :root[data-theme=dark] .theme-toggle {
     color: #e5e9ef;
     background: #252e38;
@@ -272,4 +337,11 @@ body[data-style=hutter] .lean-code { background: transparent; }
     main { padding: 2rem 1rem; }
     .sidenote { display: none; }
     .mobile-notes { display: block; margin-top: 3rem; border-top: 1px solid #ccd4dc; }
+}
+
+@media (max-width: 700px) {
+    body[data-graph-page] { height: auto; min-height: 100dvh; overflow: auto; }
+    .dependency-page { min-height: calc(100dvh - 3.5rem); }
+    .dependency-scroll { min-height: 55vh; }
+    .graph-legend { margin-left: 0; }
 }

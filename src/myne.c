@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -17,6 +18,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include "app_assets.inc"
@@ -49,6 +51,8 @@ typedef struct {
 typedef struct {
     int kind;
     char *s;
+    char *doc_name, *doc_nl, *doc_formula;
+    int file;
 } Segment;
 
 typedef struct {
@@ -57,6 +61,17 @@ typedef struct {
     int toc_count;
     int part, heading;
 } Page;
+
+typedef struct {
+    char *name, *source, *slug, *doc_name, *doc_nl, *doc_formula, *resolved_name;
+    int kind, segment, page, file, graph_id;
+    size_t offset;
+} DependencyNode;
+
+typedef struct {
+    char *name, **deps;
+    int file, ndeps, cap;
+} LeanDependencyDecl;
 
 typedef struct {
     char *key, *author, *title, *year;
@@ -78,6 +93,12 @@ static Segment segs[MAX_SEGS], appendix_segs[MAX_SEGS];
 static int nsegs, nappendix_segs, appendix_capture;
 static Page pages[MAX_PAGES];
 static int npages, current, part, bib_page;
+static DependencyNode dependency_nodes[MAX_SEGS];
+static int ndependency_nodes;
+static LeanDependencyDecl *lean_dependency_decls;
+static int nlean_dependency_decls, lean_dependency_cap;
+static unsigned char *elaborated_edges;
+static int elaborated_edge_width, elaborated_dependency_graph;
 static Bib bibs[MAX_BIB];
 static int nbibs, ncites;
 static Mapping maps[64];
@@ -785,9 +806,15 @@ static void clear_project(void) {
     }
     for (int i = 0; i < nsegs; i++) {
         free(segs[i].s);
+        free(segs[i].doc_name);
+        free(segs[i].doc_nl);
+        free(segs[i].doc_formula);
     }
     for (int i = 0; i < nappendix_segs; i++) {
         free(appendix_segs[i].s);
+        free(appendix_segs[i].doc_name);
+        free(appendix_segs[i].doc_nl);
+        free(appendix_segs[i].doc_formula);
     }
     for (int i = 0; i < npages; i++) {
         free(pages[i].title);
@@ -798,13 +825,37 @@ static void clear_project(void) {
         free(pages[i].toc.s);
         memset(&pages[i], 0, sizeof(Page));
     }
+    for (int i = 0; i < ndependency_nodes; i++) {
+        free(dependency_nodes[i].name);
+        free(dependency_nodes[i].source);
+        free(dependency_nodes[i].slug);
+        free(dependency_nodes[i].doc_name);
+        free(dependency_nodes[i].doc_nl);
+        free(dependency_nodes[i].doc_formula);
+        free(dependency_nodes[i].resolved_name);
+        memset(&dependency_nodes[i], 0, sizeof(DependencyNode));
+    }
+    for (int i = 0; i < nlean_dependency_decls; i++) {
+        free(lean_dependency_decls[i].name);
+        for (int j = 0; j < lean_dependency_decls[i].ndeps; j++) {
+            free(lean_dependency_decls[i].deps[j]);
+        }
+        free(lean_dependency_decls[i].deps);
+    }
+    free(lean_dependency_decls);
+    lean_dependency_decls = NULL;
+    nlean_dependency_decls = lean_dependency_cap = 0;
+    free(elaborated_edges);
+    elaborated_edges = NULL;
+    elaborated_edge_width = 0;
     for (int i = 0; i < nbibs; i++) {
         free(bibs[i].key);
         free(bibs[i].author);
         free(bibs[i].title);
         free(bibs[i].year);
     }
-    nfiles = nsegs = nappendix_segs = npages = nbibs = ncites = nfoot = 0;
+    nfiles = nsegs = nappendix_segs = npages = nbibs = ncites = nfoot =
+        ndependency_nodes = 0;
     appendix_capture = 0;
     current = part = 0;
     chapter_number = section_number = subsection_number = subsubsection_number = 0;
@@ -918,6 +969,12 @@ static void load_config(const char *path) {
             }
         } else if (!strcmp(key, "pageHeading")) {
             page_heading = unquote(value);
+        } else if (!strcmp(key, "dependencyGraph")) {
+            char *mode = unquote(value);
+            if (!strcmp(mode, "basic")) elaborated_dependency_graph = 0;
+            else if (!strcmp(mode, "elaborated")) elaborated_dependency_graph = 1;
+            else die("dependencyGraph must be basic or elaborated");
+            free(mode);
         } else if (!strcmp(key, "texTemplate")) {
             tex_template = unquote(value);
         } else if (!strcmp(key, "texClass")) {
@@ -1009,6 +1066,10 @@ static void segment(int kind, const char *s, size_t n) {
         return;
     }
     target[*count].kind = kind;
+    target[*count].doc_name = NULL;
+    target[*count].doc_nl = NULL;
+    target[*count].doc_formula = NULL;
+    target[*count].file = -1;
     target[(*count)++].s = slice(s, n);
 }
 
@@ -1195,7 +1256,8 @@ static void flatten(int id, int depth) {
                     free(appendix_name);
                     return;
                 }
-                appendix_segs[nappendix_segs++] = (Segment){SEG_APPENDIX_START, appendix_name};
+                appendix_segs[nappendix_segs++] =
+                    (Segment){SEG_APPENDIX_START, appendix_name, NULL, NULL, NULL, -1};
                 appendix_capture = 1;
             } else {
                 if (!appendix_capture) {
@@ -1242,6 +1304,9 @@ static void flatten(int id, int depth) {
                 begin++;
             }
             LeanDoc doc = lean_doc_parse(s + start, j - start);
+            char *hover_name = doc.name.n ? slice(doc.name.s, lean_doc_trimmed_len(&doc.name)) : NULL;
+            char *hover_nl = doc.nl.n ? slice(doc.nl.s, lean_doc_trimmed_len(&doc.nl)) : NULL;
+            char *hover_formula = doc.formula.n ? slice(doc.formula.s, lean_doc_trimmed_len(&doc.formula)) : NULL;
             LeanCodeEnd boundary = lean_code_end(s, n, begin, doc.capture, f->rel);
             code_end = boundary.end;
             resume = boundary.next;
@@ -1266,11 +1331,21 @@ static void flatten(int id, int depth) {
                 }
                 expand_text(f->rel, body.s ? body.s : "", body.n, depth);
                 free(body.s);
+                segment(SEG_CODE, s + begin, code_end - begin);
+                Segment *code = appendix_capture ? &appendix_segs[nappendix_segs - 1]
+                                                 : &segs[nsegs - 1];
+                code->file = id;
+                code->doc_name = hover_name;
+                code->doc_nl = hover_nl;
+                code->doc_formula = hover_formula;
+                hover_name = hover_nl = hover_formula = NULL;
             }
             lean_doc_free(&doc);
+            free(hover_name);
+            free(hover_nl);
+            free(hover_formula);
         }
         if (kind == '-' && code_end > begin) {
-            segment(SEG_CODE, s + begin, code_end - begin);
             segment(SEG_BOX_CLOSE, "", 0);
             i = resume;
             continue;
@@ -2072,8 +2147,431 @@ static int keyword(const char *s, size_t n) {
     return 0;
 }
 
+static int dependency_name_char(unsigned char c) {
+    return isalnum(c) || c == '_' || c == '\'' || c == '.' || c >= 0x80;
+}
+
+static int dependency_declaration(const char *s, size_t begin, size_t end, size_t *keyword,
+                                  size_t *name, size_t *name_len, int *kind) {
+    size_t p = begin;
+    while (p < end && isspace((unsigned char)s[p])) {
+        p++;
+    }
+    if (p != begin) {
+        return 0;
+    }
+    for (;;) {
+        if (p + 1 < end && s[p] == '@' && s[p + 1] == '[') {
+            int depth = 1;
+            p += 2;
+            while (p < end && depth) {
+                if (s[p] == '[') depth++;
+                else if (s[p] == ']') depth--;
+                p++;
+            }
+            while (p < end && isspace((unsigned char)s[p])) p++;
+            continue;
+        }
+        size_t word = p;
+        while (p < end && (isalpha((unsigned char)s[p]) || s[p] == '_')) p++;
+        size_t word_len = p - word;
+        const char *modifiers[] = {"private", "protected", "noncomputable", "partial", "unsafe"};
+        int modifier = 0;
+        for (size_t i = 0; i < sizeof(modifiers) / sizeof(*modifiers); i++) {
+            if (word_len == strlen(modifiers[i]) && !memcmp(s + word, modifiers[i], word_len)) {
+                modifier = 1;
+                break;
+            }
+        }
+        if (!modifier) {
+            p = word;
+            break;
+        }
+        while (p < end && isspace((unsigned char)s[p])) p++;
+    }
+    size_t cmd = p;
+    while (p < end && (isalpha((unsigned char)s[p]) || s[p] == '_')) p++;
+    size_t cmd_len = p - cmd;
+    const char *definitions[] = {"def", "abbrev", "opaque", "structure", "class", "inductive"};
+    int declaration_kind = LEAN_CODE;
+    for (size_t i = 0; i < sizeof(definitions) / sizeof(*definitions); i++) {
+        if (cmd_len == strlen(definitions[i]) && !memcmp(s + cmd, definitions[i], cmd_len)) {
+            declaration_kind = LEAN_DEF;
+            break;
+        }
+    }
+    if ((cmd_len == 5 && !memcmp(s + cmd, "lemma", 5))) declaration_kind = LEAN_LEMMA;
+    if ((cmd_len == 7 && !memcmp(s + cmd, "theorem", 7))) declaration_kind = LEAN_THEOREM;
+    if (declaration_kind == LEAN_CODE || (p < end && !isspace((unsigned char)s[p]))) {
+        return 0;
+    }
+    while (p < end && isspace((unsigned char)s[p])) p++;
+    size_t id_start = p;
+    if (p + 2 < end && (unsigned char)s[p] == 0xc2 && (unsigned char)s[p + 1] == 0xab) {
+        p += 2;
+        while (p + 1 < end && !((unsigned char)s[p] == 0xc2 && (unsigned char)s[p + 1] == 0xbb)) p++;
+        if (p + 1 < end) p += 2;
+    } else {
+        while (p < end && dependency_name_char((unsigned char)s[p])) p++;
+    }
+    if (p == id_start) return 0;
+    *keyword = cmd;
+    *name = id_start;
+    *name_len = p - id_start;
+    *kind = declaration_kind;
+    return 1;
+}
+
+static void dependency_collect_code(const char *source, int segment) {
+    while (isspace((unsigned char)*source)) source++;
+    size_t n = strlen(source), current_start = 0;
+    int current_node = -1;
+    for (size_t line = 0; line < n;) {
+        size_t end = line;
+        while (end < n && source[end] != '\n') end++;
+        size_t keyword = 0, name = 0, name_len = 0;
+        int kind = LEAN_CODE;
+        if (dependency_declaration(source, line, end, &keyword, &name, &name_len, &kind)) {
+            if (current_node >= 0) {
+                dependency_nodes[current_node].source = slice(source + current_start, line - current_start);
+            }
+            if (ndependency_nodes >= MAX_SEGS) {
+                die("too many declarations for the dependency graph");
+                return;
+            }
+            current_node = ndependency_nodes++;
+            DependencyNode *node = &dependency_nodes[current_node];
+            memset(node, 0, sizeof(*node));
+            node->name = slice(source + name, name_len);
+            node->file = segs[segment].file;
+            node->graph_id = current_node;
+            node->doc_name = segs[segment].doc_name ? xstrdup(segs[segment].doc_name) : NULL;
+            node->doc_nl = segs[segment].doc_nl ? xstrdup(segs[segment].doc_nl) : NULL;
+            node->doc_formula = segs[segment].doc_formula ? xstrdup(segs[segment].doc_formula) : NULL;
+            node->kind = kind;
+            node->segment = segment;
+            node->page = -1;
+            node->offset = keyword;
+            current_start = line;
+        }
+        line = end < n ? end + 1 : end;
+    }
+    if (current_node >= 0) {
+        dependency_nodes[current_node].source = slice(source + current_start, n - current_start);
+    }
+}
+
+static void dependency_collect(void) {
+    for (int i = 0; i < nsegs; i++) {
+        if (segs[i].kind == SEG_CODE) {
+            dependency_collect_code(segs[i].s, i);
+        }
+    }
+}
+
+static int dependency_uses(const char *source, const char *name);
+
+static LeanDependencyDecl *dependency_decl(const char *name, int file, int create) {
+    for (int i = 0; i < nlean_dependency_decls; i++) {
+        if (lean_dependency_decls[i].file == file &&
+            !strcmp(lean_dependency_decls[i].name, name)) return &lean_dependency_decls[i];
+    }
+    if (!create) return NULL;
+    if (nlean_dependency_decls == lean_dependency_cap) {
+        lean_dependency_cap = lean_dependency_cap ? lean_dependency_cap * 2 : 128;
+        lean_dependency_decls = realloc(lean_dependency_decls,
+                                         (size_t)lean_dependency_cap * sizeof(*lean_dependency_decls));
+        if (!lean_dependency_decls) exit(2);
+    }
+    LeanDependencyDecl *decl = &lean_dependency_decls[nlean_dependency_decls++];
+    memset(decl, 0, sizeof(*decl));
+    decl->name = xstrdup(name);
+    decl->file = file;
+    return decl;
+}
+
+static void dependency_parse_lean_output(char *output_text, int file) {
+    char *save = NULL;
+    for (char *line = strtok_r(output_text, "\n", &save); line;
+         line = strtok_r(NULL, "\n", &save)) {
+        if (!strncmp(line, "MYNE_DECL\t", 10)) {
+            dependency_decl(line + 10, file, 1);
+        } else if (!strncmp(line, "MYNE_EDGE\t", 10)) {
+            char *from = line + 10, *sep = strchr(from, '\t');
+            if (!sep || !sep[1]) continue;
+            *sep++ = 0;
+            LeanDependencyDecl *decl = dependency_decl(from, file, 1);
+            if (decl->ndeps == decl->cap) {
+                decl->cap = decl->cap ? decl->cap * 2 : 8;
+                decl->deps = realloc(decl->deps, (size_t)decl->cap * sizeof(*decl->deps));
+                if (!decl->deps) exit(2);
+            }
+            decl->deps[decl->ndeps++] = xstrdup(sep);
+        }
+    }
+}
+
+static size_t dependency_skip_header_space(const char *s, size_t p) {
+    for (;;) {
+        while (isspace((unsigned char)s[p])) p++;
+        if (s[p] == '-' && s[p + 1] == '-') {
+            while (s[p] && s[p] != '\n') p++;
+        } else if (s[p] == '/' && s[p + 1] == '-') {
+            int depth = 1;
+            p += 2;
+            while (s[p] && depth) {
+                if (s[p] == '/' && s[p + 1] == '-') { depth++; p += 2; }
+                else if (s[p] == '-' && s[p + 1] == '/') { depth--; p += 2; }
+                else p++;
+            }
+        } else {
+            return p;
+        }
+    }
+}
+
+static size_t dependency_import_position(const char *s, int *is_module) {
+    size_t p = dependency_skip_header_space(s, 0);
+    int module = !strncmp(s + p, "module", 6) &&
+                 (s[p + 6] == '\n' || s[p + 6] == '\r' || !s[p + 6]);
+    *is_module = module;
+    if (module) {
+        while (s[p] && s[p] != '\n') p++;
+        if (s[p]) p++;
+        p = dependency_skip_header_space(s, p);
+    }
+    if (!strncmp(s + p, "prelude", 7) &&
+        (s[p + 7] == '\n' || s[p + 7] == '\r' || !s[p + 7])) {
+        while (s[p] && s[p] != '\n') p++;
+        if (s[p]) p++;
+        return p;
+    }
+    return module ? p : 0;
+}
+
+/* A Myne manifest may live below the Lake project root (for example in src/). */
+static char *dependency_lake_root(void) {
+    char *dir = xstrdup(basedir);
+    for (;;) {
+        char *leanfile = join(dir, "lakefile.lean");
+        char *tomlfile = join(dir, "lakefile.toml");
+        int found = access(leanfile, F_OK) == 0 || access(tomlfile, F_OK) == 0;
+        free(leanfile);
+        free(tomlfile);
+        if (found) return dir;
+        char *slash = strrchr(dir, '/');
+        if (!slash || slash == dir) break;
+        *slash = 0;
+    }
+    free(dir);
+    return NULL;
+}
+
+/* Lean elaborates the original source, then reports constants in each resulting type/proof. */
+static void dependency_elaborate_file(int file) {
+    char temporary[] = "/tmp/myne-lean-XXXXXX";
+    if (!mkdtemp(temporary)) {
+        die("cannot create temporary Lean directory: %s", strerror(errno));
+        return;
+    }
+    char *source_path = join(temporary, "source.lean");
+    char *result_path = join(temporary, "result.txt");
+    char *lake_root = dependency_lake_root();
+    Buf source = {0};
+    int is_module = 0;
+    size_t import_at = dependency_import_position(files[file].data, &is_module);
+    addn(&source, files[file].data, import_at);
+    add(&source, is_module ? "public import Lean\n" : "import Lean\n");
+    add(&source, files[file].data + import_at);
+    add(&source, "\n\nopen Lean Elab Command\n"
+                 "elab \"#myne_dependencies\" : command => do\n"
+                 "  let env ← getEnv\n"
+                 "  for (name, ci) in env.constants do\n"
+                 "    if !env.isImportedConst name then\n"
+                 "      IO.println s!\"MYNE_DECL\\t{name}\"\n"
+                 "      for dep in ci.getUsedConstantsAsSet do\n"
+                 "        IO.println s!\"MYNE_EDGE\\t{name}\\t{dep}\"\n"
+                 "#myne_dependencies\n");
+    if (write_all(source_path, source.s, source.n)) {
+        die("cannot write temporary Lean source for %s", files[file].rel);
+        goto cleanup;
+    }
+    int out_fd = open(result_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (out_fd < 0) {
+        die("cannot create Lean output for %s", files[file].rel);
+        goto cleanup;
+    }
+    pid_t child = fork();
+    if (child == 0) {
+        if (chdir(lake_root ? lake_root : basedir)) {
+            perror("myne: cannot enter Lean project");
+            _exit(127);
+        }
+        dup2(out_fd, STDOUT_FILENO);
+        dup2(out_fd, STDERR_FILENO);
+        close(out_fd);
+        if (lake_root) {
+            execlp("lake", "lake", "env", "lean", source_path, (char *)NULL);
+        } else {
+            execlp("lean", "lean", source_path, (char *)NULL);
+        }
+        perror("myne: cannot run Lean or Lake");
+        _exit(127);
+    }
+    close(out_fd);
+    if (child < 0) {
+        die("cannot start Lean for %s: %s", files[file].rel, strerror(errno));
+        goto cleanup;
+    }
+    int status = 0;
+    pid_t waited;
+    do {
+        waited = waitpid(child, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    char *result = read_all(result_path);
+    if (waited != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || !result) {
+        die("Lean elaboration failed for %s:\n%.6000s", files[file].rel,
+            result ? result : "Lean produced no output");
+    } else {
+        dependency_parse_lean_output(result, file);
+    }
+    free(result);
+cleanup:
+    free(source.s);
+    free(lake_root);
+    unlink(source_path);
+    unlink(result_path);
+    rmdir(temporary);
+    free(source_path);
+    free(result_path);
+}
+
+static int dependency_name_matches(const char *full, const char *name) {
+    if (!strcmp(full, name)) return 1;
+    size_t a = strlen(full), b = strlen(name);
+    return a > b && full[a - b - 1] == '.' && !strcmp(full + a - b, name);
+}
+
+static int dependency_decl_index(const char *name, int preferred_file) {
+    for (int i = 0; i < nlean_dependency_decls; i++) {
+        if (lean_dependency_decls[i].file == preferred_file &&
+            !strcmp(lean_dependency_decls[i].name, name)) return i;
+    }
+    for (int i = 0; i < nlean_dependency_decls; i++) {
+        if (!strcmp(lean_dependency_decls[i].name, name)) return i;
+    }
+    return -1;
+}
+
+static void dependency_trace_elaborated(int root, int declaration, unsigned char *seen) {
+    if (seen[declaration]) return;
+    seen[declaration] = 1;
+    LeanDependencyDecl *decl = &lean_dependency_decls[declaration];
+    for (int i = 0; i < decl->ndeps; i++) {
+        const char *used = decl->deps[i];
+        int documented = -1;
+        for (int j = 0; j < ndependency_nodes; j++) {
+            if (dependency_nodes[j].resolved_name &&
+                !strcmp(used, dependency_nodes[j].resolved_name)) {
+                documented = j;
+                break;
+            }
+        }
+        if (documented >= 0) {
+            if (documented != root)
+                elaborated_edges[(size_t)root * elaborated_edge_width + documented] = 1;
+            continue;
+        }
+        int helper = dependency_decl_index(used, decl->file);
+        if (helper >= 0) dependency_trace_elaborated(root, helper, seen);
+    }
+}
+
+static void dependency_elaborate(void) {
+    for (int file = 0; file < nfiles && !failed; file++) {
+        if (!files[file].lean) continue;
+        dependency_elaborate_file(file);
+    }
+    if (failed) return;
+    for (int i = 0; i < ndependency_nodes; i++) {
+        DependencyNode *node = &dependency_nodes[i];
+        int match = -1, exact = -1;
+        for (int j = 0; j < nlean_dependency_decls; j++) {
+            LeanDependencyDecl *decl = &lean_dependency_decls[j];
+            if (decl->file != node->file || !dependency_name_matches(decl->name, node->name))
+                continue;
+            if (!strcmp(decl->name, node->name)) exact = j;
+            if (match >= 0 && exact < 0) match = -2;
+            else if (match != -2) match = j;
+        }
+        if (exact >= 0) match = exact;
+        if (match < 0) {
+            die("cannot resolve elaborated declaration %s in %s%s", node->name,
+                node->file >= 0 ? files[node->file].rel : "unknown file",
+                match == -2 ? " (ambiguous name)" : "");
+            return;
+        }
+        node->resolved_name = xstrdup(lean_dependency_decls[match].name);
+    }
+    elaborated_edge_width = ndependency_nodes;
+    elaborated_edges = calloc((size_t)ndependency_nodes * ndependency_nodes, 1);
+    if (!elaborated_edges) exit(2);
+    for (int i = 0; i < ndependency_nodes; i++) {
+        int declaration = dependency_decl_index(dependency_nodes[i].resolved_name,
+                                                dependency_nodes[i].file);
+        unsigned char *seen = calloc((size_t)nlean_dependency_decls, 1);
+        if (!seen) exit(2);
+        dependency_trace_elaborated(i, declaration, seen);
+        free(seen);
+    }
+}
+
+static int dependency_edge(int from, int to) {
+    if (from == to) return 0;
+    if (elaborated_dependency_graph)
+        return elaborated_edges[(size_t)dependency_nodes[from].graph_id * elaborated_edge_width +
+                                dependency_nodes[to].graph_id];
+    return dependency_uses(dependency_nodes[from].source, dependency_nodes[to].name);
+}
+
+static void dependency_prune(void) {
+    for (;;) {
+        int dependents[MAX_SEGS] = {0};
+        for (int i = 0; i < ndependency_nodes; i++) {
+            for (int j = 0; j < ndependency_nodes; j++) {
+                if (dependency_edge(i, j)) {
+                    dependents[j]++;
+                }
+            }
+        }
+        int removed = 0, kept = 0;
+        for (int i = 0; i < ndependency_nodes; i++) {
+            DependencyNode *node = &dependency_nodes[i];
+            if (node->kind == LEAN_DEF && dependents[i] == 0) {
+                free(node->name);
+                free(node->source);
+                free(node->slug);
+                free(node->doc_name);
+                free(node->doc_nl);
+                free(node->doc_formula);
+                free(node->resolved_name);
+                memset(node, 0, sizeof(*node));
+                removed++;
+                continue;
+            }
+            if (kept != i) {
+                dependency_nodes[kept] = *node;
+                memset(node, 0, sizeof(*node));
+            }
+            kept++;
+        }
+        ndependency_nodes = kept;
+        if (!removed) break;
+    }
+}
+
 /* Highlight Lean lexically; rendering does not invoke the Lean compiler. */
-static void code_html(const char *s) {
+static void code_html(const char *s, int segment) {
     while (isspace((unsigned char)*s)) {
         s++;
     }
@@ -2081,6 +2579,15 @@ static void code_html(const char *s) {
     add(b, "<pre class=\"lean-code\"><code>");
     size_t n = strlen(s);
     for (size_t i = 0; i < n;) {
+        for (int j = 0; j < ndependency_nodes; j++) {
+            if (dependency_nodes[j].segment == segment && dependency_nodes[j].offset == i) {
+                add(b, "<span class=declaration-anchor id=\"decl-");
+                char id[24];
+                snprintf(id, sizeof(id), "%d", j + 1);
+                add(b, id);
+                add(b, "\"></span>");
+            }
+        }
         if (i + 1 < n && s[i] == '-' && s[i + 1] == '-') {
             size_t j = i;
             while (j < n && s[j] != '\n') {
@@ -2666,7 +3173,134 @@ static void header_html(Buf *b) {
         add(b, "\">PDF</a>");
         free(pdf);
     }
+    if (ndependency_nodes) {
+        add(b, "<a class=header-action href=\"dependencies.html\">Dependency graph</a>");
+    }
     add(b, "</nav></header>");
+}
+
+static int dependency_uses(const char *source, const char *name) {
+    size_t len = strlen(name);
+    if (!len) return 0;
+    for (const char *p = source; (p = strstr(p, name)); p += len) {
+        int left = p == source ||
+                   !(isalnum((unsigned char)p[-1]) || p[-1] == '_' || p[-1] == '\'' ||
+                     (unsigned char)p[-1] >= 0x80);
+        int right = !p[len] ||
+                    !(isalnum((unsigned char)p[len]) || p[len] == '_' || p[len] == '\'' ||
+                      (unsigned char)p[len] >= 0x80);
+        if (left && right) return 1;
+    }
+    return 0;
+}
+
+static void dependency_graph_html(const char *dir) {
+    if (!ndependency_nodes) return;
+    Buf html = {0};
+    add(&html, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta "
+               "name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Dependency "
+               "Graph — ");
+    escape(&html, doc_title ? doc_title : "Myne");
+    add(&html, "</title>");
+    if (dark_mode_toggle) {
+        add(&html,
+            "<script>try{let t=localStorage.getItem('myne-theme');if(t!=='light'&&t!=='dark')"
+            "t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';"
+            "document.documentElement.dataset.theme=t}catch(_){}</script>");
+    }
+    add(&html, "<link rel=\"stylesheet\" href=\"style.css\"><link rel=\"stylesheet\" "
+               "href=\"katex/katex.min.css\"><script defer src=\"katex/katex.min.js\"></script>"
+               "<script defer src=\"katex/contrib/auto-render.min.js\"></script><script defer "
+               "src=\"runtime.js\"></script>");
+    if (ends(style, ".css")) {
+        add(&html, "<link rel=\"stylesheet\" href=\"custom.css\">");
+    }
+    add(&html, "</head><body data-graph-page data-style=\"");
+    escape(&html, ends(style, ".css") ? "custom" : style);
+    add(&html, "\">");
+    header_html(&html);
+    theme_toggle_html(&html);
+    add(&html, "<main class=dependency-page><h1>Dependency graph</h1>");
+    if (elaborated_dependency_graph) {
+        add(&html, "<p class=graph-help>This graph uses Lean's elaborated types and proof terms, "
+                   "including names resolved through notation and tactics.</p>");
+    } else {
+        add(&html, "<aside class=graph-warning role=note><strong>Warning: syntactic dependency "
+                   "graph.</strong> Edges come from text matching and may miss dependencies "
+                   "introduced by notation or tactics, or include false matches. Build with "
+                   "<code>--elaborated-deps</code> for Lean's elaborated dependencies.</aside>");
+    }
+    add(&html, "<p class=graph-help>Arrows point from prerequisites toward the declarations "
+               "they build. Only declarations in this Myne document become nodes. Click a node "
+               "to open it; drag nodes or the background to rearrange and pan.</p><div "
+               "class=dependency-toolbar role=toolbar aria-label=\"Graph controls\"><button "
+               "type=button data-graph-action=zoom-out aria-label=\"Zoom out\">−</button><button "
+               "type=button data-graph-action=zoom-in aria-label=\"Zoom in\">+</button><button "
+               "type=button data-graph-action=fit>Fit graph</button><button type=button "
+               "data-graph-action=reset>Reset layout</button><button type=button "
+               "data-graph-action=direction>Top to bottom</button><span class=graph-legend>"
+               "<i class=legend-definition></i> Definitions <i class=legend-lemma></i> Lemmas "
+               "<i class=legend-theorem></i> Theorems</span></div><div "
+               "class=dependency-scroll><svg class=dependency-graph role=img aria-label=\"Lean "
+               "declaration dependency graph\" viewBox=\"0 0 1200 800\"><defs><marker id=\"dep-arrow\" "
+               "markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\"><path "
+               "d=\"M0,0 L8,4 L0,8 z\" class=dependency-arrow></path></marker></defs><g "
+               "class=dependency-edges\">");
+    for (int i = 0; i < ndependency_nodes; i++) {
+        for (int j = 0; j < ndependency_nodes; j++) {
+            if (dependency_edge(i, j)) {
+                add(&html, "<path class=dependency-edge data-from=\"");
+                char index[24];
+                snprintf(index, sizeof(index), "%d", j);
+                add(&html, index);
+                add(&html, "\" data-to=\"");
+                snprintf(index, sizeof(index), "%d", i);
+                add(&html, index);
+                add(&html, "\" marker-end=\"url(#dep-arrow)\"></path>");
+            }
+        }
+    }
+    add(&html, "</g><g class=dependency-nodes>");
+    for (int i = 0; i < ndependency_nodes; i++) {
+        DependencyNode *node = &dependency_nodes[i];
+        int width = (int)strlen(node->name) * 9 + 36;
+        if (width < 150) width = 150;
+        if (width > 320) width = 320;
+        char id[24], dims[128];
+        snprintf(id, sizeof(id), "decl-%d", i + 1);
+        add(&html, "<a class=dependency-link href=\"");
+        escape(&html, node->slug ? node->slug : "index.html");
+        ch(&html, '#');
+        add(&html, id);
+        add(&html, "\" aria-label=\"Open ");
+        escape(&html, node->doc_name ? node->doc_name : node->name);
+        add(&html, "\" data-doc-name=\"");
+        escape(&html, node->doc_name ? node->doc_name : node->name);
+        add(&html, "\" data-doc-nl=\"");
+        escape(&html, node->doc_nl ? node->doc_nl : "");
+        add(&html, "\" data-doc-formula=\"");
+        escape(&html, node->doc_formula ? node->doc_formula : "");
+        add(&html, "\"><g class=\"dependency-node ");
+        add(&html, node->kind == LEAN_DEF ? "dependency-definition" :
+                    node->kind == LEAN_LEMMA ? "dependency-lemma" : "dependency-theorem");
+        add(&html, "\" data-width=\"");
+        snprintf(dims, sizeof(dims), "%d\" data-index=\"%d", width, i);
+        add(&html, dims);
+        add(&html, "\"><rect x=\"");
+        snprintf(dims, sizeof(dims), "%d\" y=\"-28\" width=\"%d\" height=\"56\" rx=\"8\"/>", -width / 2, width);
+        add(&html, dims);
+        add(&html, "<text class=dependency-name x=\"0\" y=\"-2\">");
+        escape(&html, node->name);
+        add(&html, "</text><text class=dependency-kind x=\"0\" y=\"17\">");
+        add(&html, node->kind == LEAN_DEF ? "definition"
+                    : node->kind == LEAN_LEMMA ? "lemma" : "theorem");
+        add(&html, "</text></g></a>");
+    }
+    add(&html, "</g></svg></div><div class=dependency-tooltip role=tooltip hidden></div></main></body></html>\n");
+    char *path = join(dir, "dependencies.html");
+    if (write_all(path, html.s, html.n)) die("cannot write %s", path);
+    free(path);
+    free(html.s);
 }
 
 static void write_html(const char *dir) {
@@ -2760,6 +3394,7 @@ static void write_html(const char *dir) {
         free(path);
         free(html.s);
     }
+    dependency_graph_html(dir);
 }
 
 /* Stage each build so parsing and writing errors leave the last successful output alone. */
@@ -2822,6 +3457,9 @@ static int build(void) {
         }
         segs[nsegs++] = appendix_segs[i];
         appendix_segs[i].s = NULL;
+        appendix_segs[i].doc_name = NULL;
+        appendix_segs[i].doc_nl = NULL;
+        appendix_segs[i].doc_formula = NULL;
     }
     if (failed) {
         return -1;
@@ -2831,6 +3469,10 @@ static int build(void) {
         if (failed) {
             return -1;
         }
+        dependency_collect();
+        if (elaborated_dependency_graph && ndependency_nodes) dependency_elaborate();
+        if (failed) return -1;
+        dependency_prune();
         new_page("Introduction", 0, NULL);
         for (int i = 0; i < nsegs; i++) {
             if (segs[i].kind == SEG_BOX_OPEN) {
@@ -2870,7 +3512,14 @@ static int build(void) {
                 add(&pages[current].body, "</header><div class=\"lean-doc\">");
             } else if (segs[i].kind == SEG_CODE) {
                 add(&pages[current].body, "</div>");
-                code_html(segs[i].s);
+                for (int j = 0; j < ndependency_nodes; j++) {
+                    if (dependency_nodes[j].segment == i) {
+                        dependency_nodes[j].page = current;
+                        free(dependency_nodes[j].slug);
+                        dependency_nodes[j].slug = xstrdup(pages[current].slug);
+                    }
+                }
+                code_html(segs[i].s, i);
             } else if (segs[i].kind == SEG_BOX_CLOSE) {
                 add(&pages[current].body, "</div>");
             } else if (segs[i].kind == SEG_APPENDIX_START) {
@@ -3167,7 +3816,7 @@ static int start_server(void) {
 static void usage(void) {
     puts("Usage: myne [-i root|project-dir] [-f html|tex|both] [-o outputDir] [-s style] [--config "
          "file] "
-         "[--watch] [--serve] [--port N]");
+         "[--elaborated-deps] [--watch] [--serve] [--port N]");
 }
 
 int main(int argc, char **argv) {
@@ -3246,6 +3895,8 @@ int main(int argc, char **argv) {
             }
         } else if (!strcmp(a, "--watch")) {
             watch = 1;
+        } else if (!strcmp(a, "--elaborated-deps")) {
+            elaborated_dependency_graph = 1;
         } else if (!strcmp(a, "--serve")) {
             serve = watch = live = 1;
         } else if (!strcmp(a, "-h") || !strcmp(a, "--help")) {
@@ -3299,7 +3950,7 @@ int main(int argc, char **argv) {
     for (;;) {
         nanosleep(&delay, NULL);
         unsigned long long next = fingerprint_dir("", 0);
-        if (next != previous || failed) {
+        if (next != previous) {
             previous = next;
             build();
         }
