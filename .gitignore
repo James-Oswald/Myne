@@ -1,6 +1,9 @@
 /myne
+/myne.exe
 /out/
 /examples/*/out/
+/work-tmp/
+/examples/*/work-tmp/
 __pycache__/
 *.inc
 /.cache/

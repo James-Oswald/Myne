@@ -10,7 +10,7 @@ Myne complies to either TeX which can be compiled with standard LaTeX tools, or 
 
 ## Build and quick start
 
-After cloning, run `git submodule update --init --recursive`, then `make`. The first build downloads the pinned KaTeX browser archive and verifies its SHA-256 checksum; generated `.inc` files are ignored by Git. The Makefile uses TCC when available and otherwise uses `cc`; override with `make CC=cc` or `make CC=tcc`. The resulting binary is `./myne`. KaTeX, fonts, and Myne's built-in CSS and JavaScript are embedded in the executable, so the binary generates offline HTML without a separate assets directory.
+After cloning, run `git submodule update --init --recursive`, then `make`. The first build downloads the pinned KaTeX browser archive and verifies its SHA-256 checksum; generated `.inc` files are ignored by Git. The Makefile uses TCC when available and otherwise uses `cc`; override with `make CC=cc` or `make CC=tcc`. On Windows, use the native MinGW-w64 toolchain (for example, MSYS2 UCRT64 GCC and Make) and run `make`; this produces `myne.exe` without Cygwin. The same source also builds on Unix-like systems. KaTeX, fonts, and Myne's built-in CSS and JavaScript are embedded in the executable, so the binary generates offline HTML without a separate assets directory.
 
 From an example directory, run `../../myne`. Myne reads `myne.toml` in the current directory. For example:
 

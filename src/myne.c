@@ -1,31 +1,72 @@
+#ifndef _WIN32
 #define _DARWIN_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
-#include <arpa/inet.h>
+#endif
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
-#include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <stringzilla/find.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <time.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <direct.h>
+#include <io.h>
+#include <process.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <strings.h>
+#define mkdir(path, mode) _mkdir(path)
+#define lstat(path, st) stat(path, st)
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#define getcwd _getcwd
+#define access _access
+typedef SOCKET myne_socket;
+#define socket_close(s) closesocket(s)
+#define SOCKET_INVALID INVALID_SOCKET
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <strings.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
+typedef int myne_socket;
+#define socket_close(s) close(s)
+#define SOCKET_INVALID (-1)
+#endif
 #include "app_assets.inc"
 #include "katex_assets.inc"
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
+#endif
+#ifdef _WIN32
+static void normalize_path(char *path) {
+    for (; *path; path++) if (*path == '\\') *path = '/';
+}
+static int is_reparse_point(const char *path) {
+    DWORD attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+}
+static char *myne_realpath(const char *path, char *resolved) {
+    if (!_fullpath(resolved, path, PATH_MAX)) return NULL;
+    normalize_path(resolved);
+    return resolved;
+}
+#define realpath myne_realpath
 #endif
 #define MAX_FILES 256
 #define MAX_PAGES 128
@@ -592,7 +633,9 @@ static long long stamp(const char *path) {
     if (stat(path, &st)) {
         return -1;
     }
-#ifdef __APPLE__
+#ifdef _WIN32
+    return (long long)st.st_mtime * 1000000000LL + st.st_size;
+#elif defined(__APPLE__)
     return (long long)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec + st.st_size;
 #else
     return (long long)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec + st.st_size;
@@ -1154,7 +1197,11 @@ static LeanCodeEnd lean_code_end(const char *s, size_t n, size_t begin, int capt
                 }
                 return (LeanCodeEnd){end, i};
             }
-            if (line_end < n && line_end + 1 < n && s[line_end + 1] == '\n') {
+            size_t blank_line = line_end + 1;
+            if (line_end < n && blank_line < n && s[blank_line] == '\r') {
+                blank_line++;
+            }
+            if (line_end < n && blank_line < n && s[blank_line] == '\n') {
                 size_t end = line_end;
                 while (end > begin && isspace((unsigned char)s[end - 1])) {
                     end--;
@@ -2369,11 +2416,28 @@ static char *dependency_lake_root(void) {
 
 /* Lean elaborates the original source, then reports constants in each resulting type/proof. */
 static void dependency_elaborate_file(int file) {
+#ifdef _WIN32
+    char temporary[PATH_MAX];
+    char temp_file[PATH_MAX];
+    DWORD temp_len = GetTempPathA((DWORD)sizeof(temporary), temporary);
+    if (!temp_len || temp_len >= sizeof(temporary) ||
+        !GetTempFileNameA(temporary, "myn", 0, temp_file) || !DeleteFileA(temp_file)) {
+        die("cannot create temporary Lean directory");
+        return;
+    }
+    snprintf(temporary, sizeof(temporary), "%s", temp_file);
+    if (!CreateDirectoryA(temporary, NULL)) {
+        die("cannot create temporary Lean directory");
+        return;
+    }
+    normalize_path(temporary);
+#else
     char temporary[] = "/tmp/myne-lean-XXXXXX";
     if (!mkdtemp(temporary)) {
         die("cannot create temporary Lean directory: %s", strerror(errno));
         return;
     }
+#endif
     char *source_path = join(temporary, "source.lean");
     char *result_path = join(temporary, "result.txt");
     char *lake_root = dependency_lake_root();
@@ -2396,6 +2460,49 @@ static void dependency_elaborate_file(int file) {
         die("cannot write temporary Lean source for %s", files[file].rel);
         goto cleanup;
     }
+#ifdef _WIN32
+    SECURITY_ATTRIBUTES output_security = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
+    HANDLE output_handle = CreateFileA(result_path, GENERIC_WRITE, FILE_SHARE_READ,
+                                       &output_security,
+                                       CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (output_handle == INVALID_HANDLE_VALUE) {
+        die("cannot create Lean output for %s", files[file].rel);
+        goto cleanup;
+    }
+    STARTUPINFOA startup = {0};
+    PROCESS_INFORMATION process = {0};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdOutput = output_handle;
+    startup.hStdError = output_handle;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    const char *program = lake_root ? "lake env lean" : "lean";
+    size_t command_cap = strlen(program) + strlen(source_path) * 2 + 32;
+    char *command = xmalloc(command_cap);
+    snprintf(command, command_cap, "%s \"%s\"", program, source_path);
+    BOOL created = CreateProcessA(NULL, command, NULL, NULL, TRUE, CREATE_NO_WINDOW,
+                                  NULL, lake_root ? lake_root : basedir, &startup, &process);
+    CloseHandle(output_handle);
+    free(command);
+    if (!created) {
+        die("cannot start Lean for %s (Windows error %lu)", files[file].rel,
+            (unsigned long)GetLastError());
+        goto cleanup;
+    }
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD exit_code = 1;
+    GetExitCodeProcess(process.hProcess, &exit_code);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    char *result = read_all(result_path);
+    if (exit_code != 0 || !result) {
+        die("Lean elaboration failed for %s:\n%.6000s", files[file].rel,
+            result ? result : "Lean produced no output");
+    } else {
+        dependency_parse_lean_output(result, file);
+    }
+    free(result);
+#else
     int out_fd = open(result_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (out_fd < 0) {
         die("cannot create Lean output for %s", files[file].rel);
@@ -2436,12 +2543,17 @@ static void dependency_elaborate_file(int file) {
         dependency_parse_lean_output(result, file);
     }
     free(result);
+#endif
 cleanup:
     free(source.s);
     free(lake_root);
     unlink(source_path);
     unlink(result_path);
+#ifdef _WIN32
+    RemoveDirectoryA(temporary);
+#else
     rmdir(temporary);
+#endif
     free(source_path);
     free(result_path);
 }
@@ -2670,6 +2782,15 @@ static void append_references(void) {
 }
 
 static void remove_tree(const char *path) {
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    if (attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        if (attributes & FILE_ATTRIBUTE_DIRECTORY) RemoveDirectoryA(path);
+        else DeleteFileA(path);
+        return;
+    }
+#endif
     struct stat st;
     if (lstat(path, &st)) {
         return;
@@ -2794,11 +2915,19 @@ static void project_assets(const char *rel, const char *html, const char *tex, i
             char *child = rel[0] ? join(rel, e->d_name) : xstrdup(e->d_name),
                  *path = join(basedir, child);
             struct stat st;
-            if (!lstat(path, &st) && S_ISDIR(st.st_mode)) {
+            if (!lstat(path, &st)
+#ifdef _WIN32
+                && !is_reparse_point(path)
+#endif
+                && S_ISDIR(st.st_mode)) {
                 if (strncmp(path, output, strlen(output)) && strcmp(e->d_name, "vendor")) {
                     project_assets(child, html, tex, depth + 1);
                 }
-            } else if (!lstat(path, &st) && S_ISREG(st.st_mode) && asset(child)) {
+            } else if (!lstat(path, &st)
+#ifdef _WIN32
+                       && !is_reparse_point(path)
+#endif
+                       && S_ISREG(st.st_mode) && asset(child)) {
                 char *a = join(html, child), *b = join(tex, child);
                 if (copy_file(path, a) || copy_file(path, b)) {
                     die("cannot copy asset %s", child);
@@ -3638,7 +3767,11 @@ static unsigned long long fingerprint_dir(const char *rel, int depth) {
             char *child = rel[0] ? join(rel, e->d_name) : xstrdup(e->d_name),
                  *path = join(basedir, child);
             struct stat st;
-            if (!lstat(path, &st)) {
+            if (!lstat(path, &st)
+#ifdef _WIN32
+                && !is_reparse_point(path)
+#endif
+            ) {
                 if (S_ISDIR(st.st_mode)) {
                     if (strncmp(path, output, strlen(output))) {
                         h ^= fingerprint_dir(child, depth + 1);
@@ -3696,9 +3829,14 @@ static const char *mime(const char *s) {
     return "application/octet-stream";
 }
 
-static void send_all(int fd, const char *s, size_t n) {
+static void send_all(myne_socket fd, const char *s, size_t n) {
     while (n) {
+#ifdef _WIN32
+        int chunk = n > INT_MAX ? INT_MAX : (int)n;
+        int sent = send(fd, s, chunk, 0);
+#else
         ssize_t sent = send(fd, s, n, 0);
+#endif
         if (sent <= 0) {
             return;
         }
@@ -3709,23 +3847,27 @@ static void send_all(int fd, const char *s, size_t n) {
 
 /* The browser polls the epoch endpoint and reloads after a successful rebuild. */
 static void *server_thread(void *unused) {
-    int fd = *(int *)unused;
+    myne_socket fd = *(myne_socket *)unused;
     free(unused);
     fprintf(stderr, "myne: serving http://127.0.0.1:%d/\n", port);
     for (;;) {
-        int client = accept(fd, NULL, NULL);
-        if (client < 0) {
+        myne_socket client = accept(fd, NULL, NULL);
+        if (client == SOCKET_INVALID) {
             continue;
         }
         char req[2048] = {0};
+#ifdef _WIN32
+        int n = recv(client, req, (int)sizeof(req) - 1, 0);
+#else
         ssize_t n = recv(client, req, sizeof(req) - 1, 0);
+#endif
         if (n <= 0 || strncmp(req, "GET /", 5)) {
-            close(client);
+            socket_close(client);
             continue;
         }
         char *path = req + 5, *end = strchr(path, ' ');
         if (!end) {
-            close(client);
+            socket_close(client);
             continue;
         }
         *end = 0;
@@ -3741,7 +3883,7 @@ static void *server_thread(void *unused) {
                              len);
             send_all(client, head, h);
             send_all(client, body, len);
-            close(client);
+            socket_close(client);
             continue;
         }
         if (!*path) {
@@ -3779,33 +3921,45 @@ static void *server_thread(void *unused) {
             }
         }
         free(file);
-        close(client);
+        socket_close(client);
     }
+    return NULL;
 }
 
 static int start_server(void) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) {
+#ifdef _WIN32
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa)) {
+        fprintf(stderr, "myne: WSAStartup failed\n");
+        return -1;
+    }
+#endif
+    myne_socket fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == SOCKET_INVALID) {
         perror("socket");
         return -1;
     }
     int yes = 1;
+#ifdef _WIN32
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+#else
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+#endif
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = htons((unsigned short)port);
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) || listen(fd, 16)) {
         perror("myne serve");
-        close(fd);
+        socket_close(fd);
         return -1;
     }
-    int *arg = xmalloc(sizeof(int));
+    myne_socket *arg = xmalloc(sizeof(myne_socket));
     *arg = fd;
     pthread_t thread;
     if (pthread_create(&thread, NULL, server_thread, arg)) {
         perror("pthread_create");
-        close(fd);
+        socket_close(fd);
         free(arg);
         return -1;
     }
@@ -3831,9 +3985,15 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--config") && i + 1 < argc) {
             snprintf(config_path, sizeof(config_path), "%s", argv[++i]);
+#ifdef _WIN32
+            normalize_path(config_path);
+#endif
             explicit_config = 1;
         } else if (!strcmp(argv[i], "-i") && i + 1 < argc) {
             input_arg = argv[++i];
+#ifdef _WIN32
+            normalize_path(input_arg);
+#endif
         }
     }
     if (input_arg) {
@@ -3870,6 +4030,9 @@ int main(int argc, char **argv) {
         perror("getcwd");
         return 1;
     }
+#ifdef _WIN32
+    normalize_path(basedir);
+#endif
     for (int i = 1; i < argc; i++) {
         char *a = argv[i];
         if (!strcmp(a, "--config")) {
@@ -3888,6 +4051,9 @@ int main(int argc, char **argv) {
                 format = v;
             } else if (!strcmp(a, "-o")) {
                 snprintf(output, sizeof(output), "%s", v);
+#ifdef _WIN32
+                normalize_path(output);
+#endif
             } else if (!strcmp(a, "-s")) {
                 style = v;
             } else {
