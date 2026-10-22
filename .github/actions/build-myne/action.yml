@@ -1,0 +1,81 @@
+name: Build Myne site
+description: Build a Myne project as static HTML and optionally upload it for GitHub Pages.
+
+inputs:
+  project-directory:
+    description: Project directory containing myne.toml and source files.
+    required: false
+    default: .
+  config-file:
+    description: Optional config file path relative to the project directory.
+    required: false
+  output-directory:
+    description: Output base directory relative to the workspace. HTML is written to its html subdirectory.
+    required: false
+    default: out
+  upload-pages-artifact:
+    description: Upload the generated HTML for a later actions/deploy-pages step.
+    required: false
+    default: 'false'
+
+outputs:
+  site-directory:
+    description: Absolute path to the generated static site directory.
+    value: ${{ steps.build.outputs.site-directory }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check out Myne source
+      shell: bash
+      env:
+        MYNE_REF: ${{ github.action_ref || 'main' }}
+      run: |
+        set -euo pipefail
+        source_dir="$RUNNER_TEMP/myne-source"
+        git clone --depth 1 --recurse-submodules --shallow-submodules \
+          --branch "$MYNE_REF" \
+          https://github.com/James-Oswald/Myne.git "$source_dir"
+
+    - name: Compile Myne
+      shell: bash
+      run: make -C "$RUNNER_TEMP/myne-source" CC=cc
+
+    - name: Build HTML
+      id: build
+      shell: bash
+      env:
+        PROJECT_DIRECTORY: ${{ inputs.project-directory }}
+        CONFIG_FILE: ${{ inputs.config-file }}
+        OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+      run: |
+        set -euo pipefail
+        project_dir="$PROJECT_DIRECTORY"
+        output_dir="$OUTPUT_DIRECTORY"
+        [[ "$project_dir" = /* ]] || project_dir="$GITHUB_WORKSPACE/$project_dir"
+        [[ "$output_dir" = /* ]] || output_dir="$GITHUB_WORKSPACE/$output_dir"
+        [[ -d "$project_dir" ]] || { echo "Project directory not found: $project_dir" >&2; exit 1; }
+
+        config_args=()
+        if [[ -n "$CONFIG_FILE" ]]; then
+          config_file="$CONFIG_FILE"
+          [[ "$config_file" = /* ]] || config_file="$project_dir/$config_file"
+          [[ -f "$config_file" ]] || { echo "Config file not found: $config_file" >&2; exit 1; }
+          config_args=(--config "$config_file")
+        fi
+
+        "$RUNNER_TEMP/myne-source/myne" \
+          -i "$project_dir" \
+          -f html \
+          -o "$output_dir" \
+          "${config_args[@]}"
+
+        site_dir="$output_dir/html"
+        [[ -d "$site_dir" ]] || { echo "Myne did not create the expected site directory: $site_dir" >&2; exit 1; }
+        echo "site-directory=$site_dir" >> "$GITHUB_OUTPUT"
+
+    - name: Upload GitHub Pages artifact
+      if: ${{ inputs.upload-pages-artifact == 'true' }}
+      uses: actions/upload-pages-artifact@v5
+      with:
+        path: ${{ steps.build.outputs.site-directory }}

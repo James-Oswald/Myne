@@ -26,6 +26,48 @@ Generated pages are under `out/html/`, and compile-ready TeX plus local assets a
 
 Run `myne [-i root|project-directory] [-f html|tex|both] [-o outputDir] [-s plain|verso|hutter|custom.css] [--config file] [--watch] [--serve] [--port N]`. The root and custom CSS paths are relative to the manifest directory. `bibliography` accepts a `.bib` path or an array of paths. Web options belong under `[web]`; `pageHeading` controls the deepest heading level that starts a web page and defaults to `section`. Set `tableOfContents = true` there to show links to headings one level below each higher-level page. The contents list appears after the page's other content. The persistent light/dark slider appears at the bottom right by default; set `darkModeToggle = false` under `[web]` to hide it. `commandMap` performs literal replacements for HTML rendering only. Myne processes Lean source text without invoking the Lean elaborator. For HTML, unsupported LaTeX commands and their braced arguments are omitted.
 
+## GitHub Actions
+
+Use the [Myne build action](.github/actions/build-myne/action.yml) in a workflow to compile a project into static HTML. It checks out and builds Myne, then provides the generated site's absolute path as the `site-directory` output. Set `upload-pages-artifact: true` to upload that directory for GitHub Pages. Set `project-directory` to the folder containing your Myne project; optionally set `config-file` (relative to that folder) and `output-directory` (relative to the repository workspace, default `out`). The HTML is written to `<output-directory>/html`.
+
+This workflow builds the project in `docs/` and publishes it to GitHub Pages. Replace `docs` with your project folder. Enable GitHub Pages with **GitHub Actions** as the publishing source in repository settings.
+
+```yaml
+name: Publish Myne site
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: James-Oswald/Myne/.github/actions/build-myne@main
+        with:
+          project-directory: docs
+          upload-pages-artifact: true
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
+```
+
+The generated directory can also be passed to another host's upload or deploy action through `steps.<build-step-id>.outputs.site-directory`. GitHub Pages requires `pages: write` and `id-token: write` on the deployment job; see [GitHub's Pages workflow guide](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
+
 `-i` also accepts a project directory. For example, `./myne -i examples/basic --serve` loads `examples/basic/myne.toml` and serves that project's output from the repository root.
 
 For a Lean `/-- ... -/` comment attached to a `def`, `lemma`, or `theorem`, HTML places the comment and highlighted declaration inside one box. TeX emits the comment in an AMS `definition`, `lemma`, or `theorem` environment and omits the Lean source. Module comments (`/-! ... -/`) remain document prose.
