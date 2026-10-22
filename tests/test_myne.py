@@ -1,4 +1,4 @@
-"""End-to-end checks for Myne's two fixtures and mixed-source behavior."""
+"""End-to-end checks for Myne's examples and mixed-source behavior."""
 from __future__ import annotations
 
 import http.client
@@ -67,25 +67,89 @@ class MyneTests(unittest.TestCase):
         result = run(cwd=project)
         self.assertEqual(result.returncode, 0, result.stderr)
         html = (project / "out/html/index.html").read_text()
-        chapters = sorted((project / "out/html").glob("chapter-*.html"))
-        chapter = next(path.read_text() for path in chapters if "lean-block def" in path.read_text())
+        all_html = "\n".join(path.read_text() for path in
+                             sorted((project / "out/html").glob("*.html")))
         self.assertIn("A Theory of Machine Intelligence Measures", html)
-        self.assertIn(
-            'href="section-002.html"><span class=heading-number>2</span> Abstract</a>', html
-        )
-        self.assertIn("lean-block def", chapter)
-        self.assertIn('<div class="lean-doc"> -- i </div><pre class="lean-code">', chapter)
-        self.assertIn("\\input{Chapters/rpichap1}",
-                      (project / "out/tex/rpithes.tex").read_text())
-        self.assertIn("\\usepackage{amsthm}",
-                      (project / "out/tex/rpithes.tex").read_text())
-        lean_tex = (project / "out/tex/Chapters/rpichap1.tex").read_text()
-        self.assertIn("\\begin{definition}", lean_tex)
-        self.assertNotIn("\\begin{verbatim}", lean_tex)
-        self.assertNotIn("def one_plus_one", lean_tex)
-        self.assertTrue((project / "out/tex/Chapters/rpichap1.tex").is_file())
+        self.assertIn('href="../tex/rpithes.pdf"', html)
+        self.assertIn('href="section-001.html"><span class=heading-number>1</span> Acknowledgment</a>', html)
+        self.assertIn('href="section-002.html"><span class=heading-number>2</span> Abstract</a>', html)
+        self.assertIn('href="part-007.html">References</a>', html)
+        self.assertIn("Abstract", all_html)
+        self.assertIn("Acknowledgment", all_html)
+        self.assertIn("References", all_html)
+        self.assertIn("Programming System", all_html)
+        self.assertIn("Machine Intelligence Measures", all_html)
+        self.assertIn("Diagonal Halting Set", all_html)
+        self.assertIn("ProgrammingSystem.K", all_html)
+        self.assertIn("ProgrammingSystem.H", all_html)
+        self.assertNotIn("--myne:end", all_html)
+        root_tex = (project / "out/tex/rpithes.tex").read_text()
+        self.assertIn("\\input{Chapters/rpichap1}", root_tex)
+        self.assertIn("\\input{Chapters/rpichap2}", root_tex)
+        self.assertIn("\\input{Chapters/rpichap3}", root_tex)
+        self.assertIn("\\usepackage{amsthm}", root_tex)
+        first_tex = (project / "out/tex/Chapters/rpichap1.tex").read_text()
+        self.assertIn("\\begin{definition}[Programming System]", first_tex)
+        self.assertNotIn("structure ProgrammingSystem", first_tex)
+        second_tex = (project / "out/tex/Chapters/rpichap2.tex").read_text()
+        self.assertIn("formal-measures literature", second_tex)
+        third_tex = (project / "out/tex/Chapters/rpichap3.tex").read_text()
+        self.assertIn("\\begin{definition}[Diagonal Halting Set]", third_tex)
+        self.assertNotIn("ProgrammingSystem.H", third_tex)
         self.assertTrue((project / "out/tex/thesis.cls").is_file())
         self.assertTrue((project / "out/tex/rpi_seal.png").is_file())
+
+    def test_showcase_capture_block(self) -> None:
+        project = REPO / "examples/showcase"
+        result = run(cwd=project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        html = (project / "out/html/section-002.html").read_text()
+        self.assertEqual(html.count('class="lean-block'), 2)
+        first, second = html.split('class="lean-block', 2)[1:]
+        self.assertIn("def</span> double", first)
+        self.assertIn("double_eq_add", first)
+        self.assertIn("double_zero", second)
+        self.assertNotIn("--myne:end", html)
+        self.assertNotIn("@capture", html)
+        chapter_tex = (project / "out/tex/Chapters/Arithmetic.tex").read_text()
+        self.assertEqual(chapter_tex.count("\\begin{definition}"), 1)
+        self.assertEqual(chapter_tex.count("\\begin{theorem}"), 1)
+        self.assertNotIn("double_eq_add", chapter_tex)
+        template = (project / "out/tex/template.tex").read_text()
+        self.assertIn("\\bibliography{references}", template)
+        self.assertIn("\\input{Chapters/Arithmetic.tex}", template)
+        index = (project / "out/html/index.html").read_text()
+        self.assertIn('href="../tex/template.pdf"', index)
+        self.assertIn("custom.css", index)
+        self.assertIn("footnote", index)
+        self.assertIn("knuth1984", index)
+        self.assertTrue((project / "out/html/custom.css").is_file())
+
+    def test_capture_marker_ignores_block_comments_and_requires_end(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\n')
+            source = base / "main.lean"
+            source.write_text(
+                "/-! # Capture -/\n"
+                "/--\n@capture block\nA group.\n-/\n"
+                "def first : Nat := 1\n\n"
+                "/-\n--myne:end\n-/\n"
+                "def second : Nat := 2\n"
+                "--myne:end \t\n"
+                "/-- Later. -/\ndef third : Nat := 3\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            html = (base / "out/html/index.html").read_text()
+            self.assertEqual(html.count('class="lean-block'), 2)
+            self.assertIn("def</span> second", html)
+            self.assertIn("def</span> third", html)
+            source.write_text(source.read_text().replace(
+                "def second : Nat := 2\n--myne:end \t", "def second : Nat := 2"))
+            failed = run(cwd=base)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("missing --myne:end", failed.stderr)
 
     def test_explicit_lean_include_graphic_and_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -201,6 +265,7 @@ class MyneTests(unittest.TestCase):
                 'root = "main.tex"\n'
                 'outputDir = "chapter-out"\n'
                 'pageHeading = "chapter"\n'
+                'darkModeToggle = false\n'
             )
             result = run(cwd=base)
             self.assertEqual(result.returncode, 0, result.stderr)

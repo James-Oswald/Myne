@@ -53,7 +53,8 @@ typedef struct {
 
 typedef struct {
     char *title, *slug, *number;
-    Buf body, notes;
+    Buf body, notes, toc;
+    int toc_count;
     int part, heading;
 } Page;
 
@@ -80,7 +81,7 @@ static char basedir[PATH_MAX], output[PATH_MAX], config_path[PATH_MAX];
 static char *root, *format, *style, *tex_template, *tex_class, *page_heading, *bibcfg[64];
 static int nbibcfg;
 static int live, port = 8000, failed, root_index, tex_template_index = -1, tex_class_index = -1;
-static int dark_mode_toggle, page_heading_level;
+static int dark_mode_toggle = 1, page_heading_level, web_table_of_contents;
 static int chapter_number, section_number, subsection_number, subsubsection_number;
 static int chapter_active, statement_number;
 static char statement_scope[64];
@@ -165,10 +166,11 @@ static const char *lean_environment(int kind) {
 static void addn(Buf *b, const char *s, size_t n);
 static void add(Buf *b, const char *s);
 static void ch(Buf *b, char c);
+static void die(const char *fmt, ...);
 
 typedef struct {
     Buf name, nl, formula, proof, plain;
-    int annotated;
+    int annotated, capture;
 } LeanDoc;
 
 static void lean_doc_free(LeanDoc *doc) {
@@ -206,7 +208,8 @@ static int lean_doc_tag(const char *s, size_t n, const char **tag, size_t *tag_l
     if (!((len == 4 && !memcmp(s + begin, "name", 4)) ||
           (len == 2 && !memcmp(s + begin, "nl", 2)) ||
           (len == 7 && !memcmp(s + begin, "formula", 7)) ||
-          (len == 5 && !memcmp(s + begin, "proof", 5)))) {
+          (len == 5 && !memcmp(s + begin, "proof", 5)) ||
+          (len == 7 && !memcmp(s + begin, "capture", 7)))) {
         return 0;
     }
     while (i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == ':')) {
@@ -256,7 +259,18 @@ static LeanDoc lean_doc_parse(const char *s, size_t n) {
         size_t tag_len = 0, value_start = 0;
         if (lean_doc_tag(s + i, end - i, &tag, &tag_len, &value_start)) {
             doc.annotated = 1;
-            if (tag_len == 4) {
+            if (tag_len == 7 && !memcmp(tag, "capture", 7)) {
+                const char *value = s + i + value_start;
+                size_t value_len = end - i - value_start;
+                while (value_len && isspace((unsigned char)value[value_len - 1])) {
+                    value_len--;
+                }
+                if (value_len != 5 || memcmp(value, "block", 5) || doc.capture) {
+                    die("expected a single @capture block directive");
+                }
+                doc.capture = 1;
+                field = NULL;
+            } else if (tag_len == 4) {
                 field = &doc.name;
                 lean_doc_append(field, s + i + value_start, end - i - value_start);
                 field = NULL;
@@ -757,6 +771,7 @@ static void clear_project(void) {
         free(pages[i].number);
         free(pages[i].body.s);
         free(pages[i].notes.s);
+        free(pages[i].toc.s);
         memset(&pages[i], 0, sizeof(Page));
     }
     for (int i = 0; i < nbibs; i++) {
@@ -816,6 +831,10 @@ static void load_config(const char *path) {
         } else if (!strcmp(key, "darkModeToggle")) {
             if (!config_bool(value, &dark_mode_toggle)) {
                 die("darkModeToggle must be true or false");
+            }
+        } else if (!strcmp(key, "tableOfContents")) {
+            if (!config_bool(value, &web_table_of_contents)) {
+                die("tableOfContents must be true or false");
             }
         } else if (!strcmp(key, "pageHeading")) {
             page_heading = unquote(value);
@@ -919,6 +938,75 @@ static void expand_text(const char *source, const char *s, size_t n, int depth) 
     segment(SEG_TEXT, s + start, n - start);
 }
 
+typedef struct {
+    size_t end, next;
+} LeanCodeEnd;
+
+/* A capture marker must be a whole line comment outside strings and block comments. */
+static LeanCodeEnd lean_code_end(const char *s, size_t n, size_t begin, int capture,
+                                 const char *rel) {
+    if (!capture) {
+        const char *stop = finds(s + begin, n - begin, "\n\n");
+        size_t end = stop ? (size_t)(stop - s) : n;
+        return (LeanCodeEnd){end, end};
+    }
+    int block_depth = 0, quoted = 0, escaped = 0;
+    for (size_t i = begin; i < n;) {
+        size_t line_end = i;
+        while (line_end < n && s[line_end] != '\n') {
+            line_end++;
+        }
+        if (!block_depth && !quoted) {
+            size_t p = i;
+            while (p < line_end && (s[p] == ' ' || s[p] == '\t' || s[p] == '\r')) {
+                p++;
+            }
+            size_t tail = line_end;
+            while (tail > p && (s[tail - 1] == ' ' || s[tail - 1] == '\t' || s[tail - 1] == '\r')) {
+                tail--;
+            }
+            if (tail - p == 10 && !memcmp(s + p, "--myne:end", 10)) {
+                size_t end = i;
+                while (end > begin && isspace((unsigned char)s[end - 1])) {
+                    end--;
+                }
+                if (end == begin) {
+                    die("empty @capture block in %s", rel);
+                }
+                return (LeanCodeEnd){end, line_end < n ? line_end + 1 : line_end};
+            }
+        }
+        for (size_t p = i; p < line_end;) {
+            if (quoted) {
+                if (escaped) {
+                    escaped = 0;
+                } else if (s[p] == '\\') {
+                    escaped = 1;
+                } else if (s[p] == '"') {
+                    quoted = 0;
+                }
+                p++;
+            } else if (p + 1 < line_end && s[p] == '/' && s[p + 1] == '-') {
+                block_depth++;
+                p += 2;
+            } else if (block_depth && p + 1 < line_end && s[p] == '-' && s[p + 1] == '/') {
+                block_depth--;
+                p += 2;
+            } else if (!block_depth && p + 1 < line_end && s[p] == '-' && s[p + 1] == '-') {
+                break;
+            } else if (!block_depth && s[p] == '"') {
+                quoted = 1;
+                p++;
+            } else {
+                p++;
+            }
+        }
+        i = line_end < n ? line_end + 1 : line_end;
+    }
+    die("missing --myne:end for @capture block in %s", rel);
+    return (LeanCodeEnd){n, n};
+}
+
 /* Lean prose lives in /-! and /-- comments; the latter owns the next code block. */
 static void flatten(int id, int depth) {
     if (depth > MAX_FILES) {
@@ -963,16 +1051,18 @@ static void flatten(int id, int depth) {
         }
         size_t begin = j + 2;
         size_t code_end = begin;
+        size_t resume = begin;
         if (kind == '-') {
             while (begin < n && isspace((unsigned char)s[begin])) {
                 begin++;
             }
-            const char *stop = finds(s + begin, n - begin, "\n\n");
-            code_end = stop ? (size_t)(stop - s) : n;
+            LeanDoc doc = lean_doc_parse(s + start, j - start);
+            LeanCodeEnd boundary = lean_code_end(s, n, begin, doc.capture, f->rel);
+            code_end = boundary.end;
+            resume = boundary.next;
             if (code_end > begin) {
                 int declaration = lean_kind(s + begin, code_end - begin);
                 const char *kind_name = lean_kind_name(declaration);
-                LeanDoc doc = lean_doc_parse(s + start, j - start);
                 Buf label = {0};
                 add(&label, kind_name);
                 ch(&label, '|');
@@ -991,13 +1081,14 @@ static void flatten(int id, int depth) {
                 }
                 expand_text(f->rel, body.s ? body.s : "", body.n, depth);
                 free(body.s);
-                lean_doc_free(&doc);
             }
+            lean_doc_free(&doc);
         }
         if (kind == '-' && code_end > begin) {
             segment(SEG_CODE, s + begin, code_end - begin);
             segment(SEG_BOX_CLOSE, "", 0);
-            i = code_end;
+            i = resume;
+            continue;
         } else {
             Buf body = {0};
             markdown_tex(&body, s + start, j - start, id == root_index, &top_heading_seen);
@@ -1092,12 +1183,12 @@ static void translate_lean(File *f, int isroot) {
                 i++;
             }
             size_t begin = i;
-            const char *stop = finds(s + i, n - i, "\n\n");
-            i = stop ? (size_t)(stop - s) : n;
-            if (i > begin) {
-                int declaration = lean_kind(s + begin, i - begin);
+            LeanDoc doc = lean_doc_parse(s + start, j - start);
+            LeanCodeEnd boundary = lean_code_end(s, n, i, doc.capture, f->rel);
+            i = boundary.next;
+            if (boundary.end > begin) {
+                int declaration = lean_kind(s + begin, boundary.end - begin);
                 const char *environment = lean_environment(declaration);
-                LeanDoc doc = lean_doc_parse(s + start, j - start);
                 if (environment) {
                     add(&b, "\n\\begin{");
                     add(&b, environment);
@@ -1127,6 +1218,7 @@ static void translate_lean(File *f, int isroot) {
                 lean_doc_free(&doc);
                 continue;
             }
+            lean_doc_free(&doc);
         }
         markdown_tex(&b, s + start, j - start, isroot, &top_heading_seen);
     }
@@ -1689,6 +1781,9 @@ static void text_html(const char *s) {
                         if (type >= 2 && type <= page_heading_level) {
                             new_page(arg, type, number.s);
                         } else {
+                            int toc_heading = web_table_of_contents &&
+                                              type == pages[current].heading + 1;
+                            int toc_id = ++pages[current].toc_count;
                             char tag[32];
                             int level = type - page_heading_level + 1;
                             if (level < 2) {
@@ -1696,7 +1791,25 @@ static void text_html(const char *s) {
                             } else if (level > 6) {
                                 level = 6;
                             }
-                            snprintf(tag, sizeof(tag), "<h%d>", level);
+                            if (toc_heading) {
+                                snprintf(tag, sizeof(tag), "<h%d id=\"page-heading-%d\">", level,
+                                         toc_id);
+                                add(&pages[current].toc, "<li><a href=\"#page-heading-");
+                                char id[16];
+                                snprintf(id, sizeof(id), "%d", toc_id);
+                                add(&pages[current].toc, id);
+                                add(&pages[current].toc, "\">");
+                                if (number.n) {
+                                    add(&pages[current].toc, "<span class=heading-number>");
+                                    escape(&pages[current].toc, number.s);
+                                    add(&pages[current].toc, "</span> ");
+                                }
+                                escape(&pages[current].toc, arg);
+                                add(&pages[current].toc, "</a></li>");
+                            } else {
+                                pages[current].toc_count--;
+                                snprintf(tag, sizeof(tag), "<h%d>", level);
+                            }
                             add(&pages[current].body, tag);
                             if (number.n) {
                                 add(&pages[current].body, "<span class=heading-number>");
@@ -2256,11 +2369,67 @@ static void nav_html(Buf *b, int active) {
         escape(b, pages[i].title);
         add(b, "</a>");
     }
-    if (dark_mode_toggle) {
-        add(b, "<button class=theme-toggle type=button aria-label=\"Toggle dark mode\" "
-               "aria-pressed=\"false\">Dark mode</button>");
-    }
     add(b, "</nav>");
+}
+
+static void theme_toggle_html(Buf *b) {
+    if (dark_mode_toggle) {
+        add(b, "<button class=theme-toggle type=button role=switch aria-label=\"Color theme\" "
+               "aria-checked=\"false\"><span class=theme-label>Light</span>"
+               "<span class=theme-switch aria-hidden=\"true\"><span class=theme-thumb></span></span>"
+               "<span class=theme-label>Dark</span></button>");
+    }
+}
+
+static void page_toc_html(Buf *b, int page) {
+    if (!web_table_of_contents || pages[page].heading < 2 ||
+        pages[page].heading >= page_heading_level) {
+        return;
+    }
+    int child_pages = 0;
+    for (int j = page + 1; j < npages; j++) {
+        if (pages[j].heading <= pages[page].heading) {
+            break;
+        }
+        if (pages[j].heading == pages[page].heading + 1) {
+            child_pages++;
+        }
+    }
+    if (!child_pages && !pages[page].toc_count) {
+        return;
+    }
+    add(b, "<nav class=page-toc aria-label=\"On this page\"><h2>Contents</h2><ul>");
+    if (pages[page].toc.s) {
+        addn(b, pages[page].toc.s, pages[page].toc.n);
+    }
+    for (int j = page + 1; j < npages; j++) {
+        if (pages[j].heading <= pages[page].heading) {
+            break;
+        }
+        if (pages[j].heading != pages[page].heading + 1) {
+            continue;
+        }
+        add(b, "<li><a href=\"");
+        escape(b, pages[j].slug);
+        add(b, "\">");
+        if (pages[j].number) {
+            add(b, "<span class=heading-number>");
+            escape(b, pages[j].number);
+            add(b, "</span> ");
+        }
+        escape(b, pages[j].title);
+        add(b, "</a></li>");
+    }
+    add(b, "</ul></nav>");
+}
+
+static char *document_pdf_name(void) {
+    int source = tex_template_index >= 0 ? tex_template_index : root_index;
+    char *pdf = tex_name(files[source].rel);
+    if (ends(pdf, ".tex")) {
+        strcpy(pdf + strlen(pdf) - 4, ".pdf");
+    }
+    return pdf;
 }
 
 static void header_html(Buf *b) {
@@ -2268,10 +2437,7 @@ static void header_html(Buf *b) {
     escape(b, doc_title ? doc_title : "Myne");
     add(b, "</a><nav class=header-actions aria-label=\"Document actions\">");
     if (!strcmp(format, "both")) {
-        char *pdf = tex_name(files[root_index].rel);
-        if (ends(pdf, ".tex")) {
-            strcpy(pdf + strlen(pdf) - 4, ".pdf");
-        }
+        char *pdf = document_pdf_name();
         add(b, "<a class=header-action href=\"../tex/");
         escape(b, pdf);
         add(b, "\">PDF</a>");
@@ -2331,6 +2497,7 @@ static void write_html(const char *dir) {
         add(&html, live ? "\" data-live=\"1\">" : "\" data-live=\"0\">");
         header_html(&html);
         nav_html(&html, i);
+        theme_toggle_html(&html);
         add(&html, "<main><h1>");
         if (pages[i].number) {
             add(&html, "<span class=heading-number>");
@@ -2361,6 +2528,7 @@ static void write_html(const char *dir) {
             addn(&html, pages[i].notes.s, pages[i].notes.n);
             add(&html, "</ol></aside>");
         }
+        page_toc_html(&html, i);
         add(&html, "</main></body></html>\n");
         char *path = join(dir, pages[i].slug);
         if (write_all(path, html.s, html.n)) {
@@ -2517,10 +2685,7 @@ static int build(void) {
         free(dummy);
     }
     if (!failed && !strcmp(format, "both")) {
-        char *pdf = tex_name(files[root_index].rel);
-        if (ends(pdf, ".tex")) {
-            strcpy(pdf + strlen(pdf) - 4, ".pdf");
-        }
+        char *pdf = document_pdf_name();
         char *old_tex = join(output, "tex"), *old_pdf = join(old_tex, pdf);
         char *new_pdf = join(tex, pdf);
         struct stat st;

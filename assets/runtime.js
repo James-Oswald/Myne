@@ -5,8 +5,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     const applyTheme=theme=>{
       document.documentElement.dataset.theme=theme;
       const dark=theme==='dark';
-      themeToggle.setAttribute('aria-pressed',String(dark));
-      themeToggle.textContent=dark?'Light mode':'Dark mode';
+      themeToggle.setAttribute('aria-checked',String(dark));
     };
     applyTheme(document.documentElement.dataset.theme||'light');
     themeToggle.addEventListener('click',()=>{

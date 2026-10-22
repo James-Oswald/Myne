@@ -20,11 +20,11 @@ cd examples/basic
 cd out/tex && latexmk -pdf -interaction=nonstopmode sample.tex
 ```
 
-To render and compile all example projects, run `make pdfs` from the repository root. This produces `sample.pdf`, `main.pdf`, and `rpithes.pdf` in the respective `examples/*/out/tex/` directories.
+To render and compile all example projects, run `make pdfs` from the repository root. `examples/thesis` keeps the RPI TeX root, class, and command mappings while filling its chapters with excerpts from the separate Thesis repository. `examples/showcase` demonstrates the authoring features together.
 
 Generated pages are under `out/html/`, and compile-ready TeX plus local assets are under `out/tex/`. `-f html`, `-f tex`, or `-f both` selects which directory is generated. `--watch` rebuilds on source and asset changes. `--serve` implies watch mode and serves HTML at `http://127.0.0.1:8000/`, with automatic browser refresh. Use `--port N` to change the port.
 
-Run `myne [-i root|project-directory] [-f html|tex|both] [-o outputDir] [-s plain|verso|hutter|custom.css] [--config file] [--watch] [--serve] [--port N]`. The root and custom CSS paths are relative to the manifest directory. `bibliography` accepts a `.bib` path or an array of paths. `pageHeading` controls the deepest heading level that starts a web page and defaults to `section`. `darkModeToggle = true` adds a persistent light/dark switch to the web navigation. `commandMap` performs literal replacements for HTML rendering only. Myne processes Lean source text without invoking the Lean elaborator. For HTML, unsupported LaTeX commands and their braced arguments are omitted.
+Run `myne [-i root|project-directory] [-f html|tex|both] [-o outputDir] [-s plain|verso|hutter|custom.css] [--config file] [--watch] [--serve] [--port N]`. The root and custom CSS paths are relative to the manifest directory. `bibliography` accepts a `.bib` path or an array of paths. Web options belong under `[web]`; `pageHeading` controls the deepest heading level that starts a web page and defaults to `section`. Set `tableOfContents = true` there to show links to headings one level below each higher-level page. The contents list appears after the page's other content. The persistent light/dark slider appears at the bottom right by default; set `darkModeToggle = false` under `[web]` to hide it. `commandMap` performs literal replacements for HTML rendering only. Myne processes Lean source text without invoking the Lean elaborator. For HTML, unsupported LaTeX commands and their braced arguments are omitted.
 
 `-i` also accepts a project directory. For example, `./myne -i examples/basic --serve` loads `examples/basic/myne.toml` and serves that project's output from the repository root.
 
@@ -43,9 +43,11 @@ To use Myne from the command line, you can run `myne` command. The command will 
 - `outputDir` : Specifies the output directory. defaults to `./out`
 - `bibliography` : Links a bibtex bibliography `.bib` file at the end of document. This is useful if root document is a `.lean` file and you dont want to add a `/-! \bibliography{...} -/` comment manually, which would otherwise be required to include the bibliography.
 - `commandMap` : A dictionary mapping unsupported LaTeX commands to their replacements for web rendering. This is useful when targeting web output and certain LaTeX commands are not supported, IE, you have a special format `.cls` file that defines custom title or section commands that would otherwise disapear on web rendering if not mapped to supported HTML equivalents.
-- `style` : Specifies a CSS style file to be used for web output. This allows customizing the appearance of the generated HTML. Built in styles are specified without the extension, while custom styles should include a path with `.css`
-- `pageHeading` : The deepest heading level that starts a new web page. Supports `part`, `chapter`, `section`, `subsection`, and `subsubsection`; defaults to `section`. The selected level and higher-level headings each start pages.
-- `darkModeToggle` : Set to `true` to add a light/dark theme button to the web navigation. The visitor's choice is shared across generated pages and saved in the browser.
+- `[web]` : Starts the web rendering options table.
+- `[web].style` : Specifies a CSS style file to be used for web output. This allows customizing the appearance of the generated HTML. Built in styles are specified without the extension, while custom styles should include a path with `.css`.
+- `[web].pageHeading` : The deepest heading level that starts a new web page. Supports `part`, `chapter`, `section`, `subsection`, and `subsubsection`; defaults to `section`. The selected level and higher-level headings each start pages.
+- `[web].tableOfContents` : Set to `true` to show links to headings exactly one level below pages above `pageHeading`. Defaults to `false`.
+- `[web].darkModeToggle` : Set to `false` to hide the light/dark theme slider. It is shown at the bottom right by default, and the visitor's choice is shared across generated pages and saved in the browser.
 
 Arguments:
 - `-i <input-file-or-project-directory>`: Specifies a Lean4 or LaTeX root file, or loads `myne.toml` from a project directory. Defaults to the root file in the manifest.
@@ -119,7 +121,7 @@ comments and parse tex content inside of them.
 ### Web Rendering
 - Myne should use [KaTeX](https://katex.org/) for rendering and directly include the necessary minified KaTeX CSS and JavaScript in the output directory.
 - Myne should extract documentation comments and convert them into HTML, preserving the tex content within `$...$` and `$$...$$` for inline and display math respectively.
-- On the web, the doc comment and code after `/-- ... -/` share a styled box. The highlighted code ends at the first blank line. In TeX, `def`, `lemma`, and `theorem` comments become AMS theorem environments and the Lean code is omitted.
+- On the web, the doc comment and code after `/-- ... -/` share a styled box. By default, the highlighted code ends at the first blank line. In TeX, `def`, `lemma`, and `theorem` comments become AMS theorem environments and the Lean code is omitted.
 
 - Footnotes should be displayed in the margin for web output, unless the screen is too narrow to accommodate them, in which case they should be displayed inline at the bottom of the content.
 - Citations should be displayed in the margin for web output, unless the screen is too narrow to accommodate them, in which case they should be displayed inline at the bottom of the content.
@@ -152,6 +154,21 @@ If the root file is a latex file, it should contain a document class command wit
 ## Annotated Lean declarations
 
 Attached Lean doc comments accept `@name`, `@nl`, `@formula`, and `@proof` fields. `@name` supplies the declaration title; `@nl` supplies its natural-language statement and is the default prose field; `@formula` supplies a display formula; and `@proof` supplies a natural-language proof for lemmas and theorems. Fields begin on their own line and continue until the next field. See `examples/annotations/main.lean` for a complete example.
+
+Add `@capture block` on its own line in a doc comment to include multiple following declarations, including blank lines, in one web code box. End the group with a standalone `--myne:end` line. The marker is excluded from the rendered code. Myne reports an error if the marker is missing. The TeX output still renders the comment once and omits its Lean code. See `examples/showcase/Chapters/Arithmetic.lean` for a complete example. For example:
+
+```lean
+/--
+@name Doubling
+@capture block
+@nl
+Doubling adds a number to itself.
+-/
+def double (n : Nat) := n + n
+
+theorem double_eq_add (n : Nat) : double n = n + n := by rfl
+--myne:end
+```
 
 
 For Lean-root projects, `texTemplate` can name a TeX root template and `texClass` can name a local document class. The template must contain `{{MYNE_CONTENT}}` where the rendered Lean document belongs and `{{MYNE_THEOREM_SETUP}}` in its preamble. Myne follows the template's `\input` and `\include` references and writes the rendered template using the template's filename.

@@ -57,17 +57,53 @@ a { color: #295c9a; }
 .heading-number { font-variant-numeric: tabular-nums; }
 .toc-nav .heading-number { color: #657385; font-weight: 600; }
 .theme-toggle {
-    width: 100%;
-    margin-top: 1.25rem;
-    padding: 0.45rem 0.65rem;
+    position: fixed;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.55rem;
+    padding: 0.55rem 0.65rem;
     border: 1px solid #b7c4d0;
     border-radius: 0.4rem;
     background: #fff;
     color: #20242a;
     cursor: pointer;
     font: 600 0.8rem system-ui, sans-serif;
+    box-shadow: 0 2px 8px #17212b22;
 }
 .theme-toggle:hover { background: #f7f9fb; }
+.theme-toggle:focus-visible { outline: 2px solid #3976b8; outline-offset: 2px; }
+.theme-switch {
+    position: relative;
+    flex: 0 0 2.45rem;
+    height: 1.35rem;
+    border: 1px solid #94a3b3;
+    border-radius: 999px;
+    background: #e8edf2;
+    transition: background-color 160ms ease;
+}
+.theme-thumb {
+    position: absolute;
+    top: 0.12rem;
+    left: 0.12rem;
+    width: 1.05rem;
+    height: 1.05rem;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px #17212b55;
+    transition: transform 160ms ease;
+}
+.theme-label { color: #667586; }
+:root[data-theme=light] .theme-label:first-child,
+:root[data-theme=dark] .theme-label:last-child { color: inherit; }
+:root[data-theme=dark] .theme-switch { background: #426b99; border-color: #6e8fb3; }
+:root[data-theme=dark] .theme-thumb { transform: translateX(1.1rem); }
+@media (prefers-reduced-motion: reduce) {
+    .theme-switch, .theme-thumb { transition: none; }
+}
 
 main { max-width: 56rem; margin: 0 auto; padding: 3rem 2rem 6rem; }
 @media (min-width: 1101px) {
@@ -133,6 +169,17 @@ pre {
 .references { margin-top: 3rem; border-top: 1px solid #ccd4dc; }
 .references li { margin: 0.7rem 0; }
 .part-list { padding-left: 1.2rem; }
+.page-toc {
+    margin: 1.5rem 0 2rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid #d6dce4;
+    border-radius: 0.5rem;
+    background: #fff;
+    font: 0.95rem system-ui, sans-serif;
+}
+.page-toc h2 { margin: 0 0 0.6rem; font-size: 1rem; }
+.page-toc ul { margin: 0; padding-left: 1.2rem; }
+.page-toc li { margin: 0.3rem 0; }
 .katex-display { overflow: auto hidden; }
 .mobile-notes { display: none; }
 
@@ -169,6 +216,10 @@ body[data-style=hutter] .lean-code { background: transparent; }
 :root[data-theme=dark] .toc-nav {
     background: #192028;
     border-color: #34404d;
+}
+:root[data-theme=dark] .page-toc {
+    background: #202a35;
+    border-color: #465465;
 }
 :root[data-theme=dark] .theme-toggle {
     color: #e5e9ef;

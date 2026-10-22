@@ -1,0 +1,9 @@
+root = "main.lean"
+format = "both"
+bibliography = ["references.bib"]
+texTemplate = "template.tex"
+
+[web]
+pageHeading = "section"
+style = "style.css"
+tableOfContents = true
