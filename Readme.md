@@ -70,6 +70,10 @@ The generated directory can also be passed to another host's upload or deploy ac
 
 `-i` also accepts a project directory. For example, `./myne -i examples/basic --serve` loads `examples/basic/myne.toml` and serves that project's output from the repository root.
 
+## Visual Studio Code extension
+
+The [Myne KaTeX Preview extension](vscode-extension/README.md) opens a live side preview for Lean, Markdown, and LaTeX files. It renders inline and display math with KaTeX and works offline. To package it as a VSIX, run `npm run prepare-assets` from `vscode-extension/` to build the browser assets from the KaTeX submodule, then run `vsce package` there. Generated packaging assets are Git-ignored.
+
 For a Lean `/-- ... -/` comment attached to a `def`, `lemma`, or `theorem`, HTML places the comment and highlighted declaration inside one box. TeX emits the comment in an AMS `definition`, `lemma`, or `theorem` environment and omits the Lean source. Module comments (`/-! ... -/`) remain document prose.
 
 ## Usage / Features
@@ -85,6 +89,7 @@ To use Myne from the command line, you can run `myne` command. The command will 
 - `outputDir` : Specifies the output directory. defaults to `./out`
 - `bibliography` : Links a bibtex bibliography `.bib` file at the end of document. This is useful if root document is a `.lean` file and you dont want to add a `/-! \bibliography{...} -/` comment manually, which would otherwise be required to include the bibliography.
 - `commandMap` : A dictionary mapping unsupported LaTeX commands to their replacements for web rendering. This is useful when targeting web output and certain LaTeX commands are not supported, IE, you have a special format `.cls` file that defines custom title or section commands that would otherwise disapear on web rendering if not mapped to supported HTML equivalents.
+- `[declarationMap]` : Maps quoted Lean declaration prefixes to `"def"`, `"lemma"`, or `"theorem"` in both HTML and TeX. Myne matches after attributes and modifiers, requires whitespace or the declaration end after the prefix, and chooses the longest configured match before its built-in declaration names. For example, `"def∇" = "def"` and `"inductive∇" = "def"` classify custom Lean syntax as definitions.
 - `[web]` : Starts the web rendering options table.
 - `[web].style` : Specifies a CSS style file to be used for web output. This allows customizing the appearance of the generated HTML. Built in styles are specified without the extension, while custom styles should include a path with `.css`.
 - `[web].pageHeading` : The deepest heading level that starts a new web page. Supports `part`, `chapter`, `section`, `subsection`, and `subsubsection`; defaults to `section`. The selected level and higher-level headings each start pages.
@@ -198,6 +203,8 @@ If the root file is a latex file, it should contain a document class command wit
 Attached Lean doc comments accept `@name`, `@nl`, `@formula`, and `@proof` fields. `@name` supplies the declaration title; `@nl` supplies its natural-language statement and is the default prose field; `@formula` supplies a display formula; and `@proof` supplies a natural-language proof for lemmas and theorems. Fields begin on their own line and continue until the next field. See `examples/annotations/main.lean` for a complete example.
 
 Add `@capture block` on its own line in a doc comment to include multiple following declarations, including blank lines, in one web code box. End the group with a standalone `--myne:end` line. The marker is excluded from the rendered code. Myne reports an error if the marker is missing. The TeX output still renders the comment once and omits its Lean code. See `examples/showcase/Chapters/Arithmetic.lean` for a complete example. For example:
+Use `--myne:appendix_start NAME` and `--myne:appendix_end` as standalone Lean line comments to move the enclosed material to a named appendix after the main text. In web output, each appendix starts a page at the configured top-level heading (`pageHeading`); TeX output starts an appendix section. Markers must be paired and cannot nest.
+
 
 ```lean
 /--

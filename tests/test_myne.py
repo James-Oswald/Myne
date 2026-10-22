@@ -19,6 +19,134 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 class MyneTests(unittest.TestCase):
+    def test_declaration_map_in_html_and_tex(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text(
+                'root = "main.lean"\nformat = "both"\n'
+                '[declarationMap]\n'
+                '"def" = "theorem"\n'
+                '"def∇" = "def"\n'
+                '"inductive∇" = "def"\n'
+                '"custom lemma" = "lemma"\n'
+                '"custom=lemma" = "lemma"\n'
+                '"theorem" = "def"\n'
+            )
+            (base / "main.lean").write_text(
+                '/-! # Mapped Declarations -/\n'
+                '/-- @name Recursive definition -/\n'
+                '@[simp] noncomputable def∇ recursive : Nat := 1\n\n'
+                '/-- @name Recursive type -/\n'
+                'inductive∇ Recursive where\n| base\n\n'
+                '/-- @name Custom lemma -/\n'
+                'private custom lemma result : True := by trivial\n\n'
+                '/-- @name Quoted equals key -/\n'
+                'custom=lemma result2 : True := by trivial\n\n'
+                '/-- @name Builtin override -/\n'
+                'theorem override : True := by trivial\n\n'
+                '/-- @name Longest match -/\n'
+                'def ordinary : Nat := 1\n\n'
+                '/-- @name Boundary -/\n'
+                'def∇Extra unrelated : Nat := 1\n'
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            html = (base / "out/html/index.html").read_text()
+            tex = (base / "out/tex/main.tex").read_text()
+            self.assertEqual(html.count('class="lean-block def"'), 3)
+            self.assertEqual(html.count('class="lean-block lemma"'), 2)
+            self.assertEqual(html.count('class="lean-block theorem"'), 1)
+            self.assertEqual(html.count('class="lean-block code"'), 1)
+            self.assertEqual(tex.count('\\begin{definition}'), 3)
+            self.assertEqual(tex.count('\\begin{lemma}'), 2)
+            self.assertEqual(tex.count('\\begin{theorem}'), 1)
+
+    def test_named_appendix_markers_move_content_to_top_level_appendix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text(
+                'root = "main.lean"\nformat = "both"\n'
+                '[web]\npageHeading = "section"\n'
+            )
+            (base / "main.lean").write_text(
+                "/-! # Appendix test\n\section{Main}\nMain content. -/\n"
+                "--myne:appendix_start Supplementary Results\n"
+                "/-! \subsection{Supplementary details}\nMoved appendix prose. -/\n"
+                "/-- @name Appended theorem\n"
+                "@nl\nThis theorem belongs in the appendix.\n"
+                "@formula\n$$x = x$$\n-/\n"
+                "theorem appended : True := by trivial\n"
+                "--myne:appendix_end\n"
+                "/-! \section{After appendix}\nThis remains in the main text. -/\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            html_dir = base / "out/html"
+            main = (html_dir / "section-001.html").read_text()
+            after = (html_dir / "section-002.html").read_text()
+            appendix = (html_dir / "section-003.html").read_text()
+            all_html = "\n".join(p.read_text() for p in sorted(html_dir.glob("*.html")))
+            self.assertIn("Main content", main)
+            self.assertIn("This remains in the main text", after)
+            self.assertNotIn("Appended theorem", after)
+            self.assertIn(
+                "<h1><span class=heading-number>3</span> Appendix: Supplementary Results</h1>",
+                appendix,
+            )
+            self.assertIn("Supplementary details", appendix)
+            self.assertIn("Moved appendix prose", appendix)
+            self.assertIn("lean-block theorem", appendix)
+            self.assertNotIn("--myne:appendix_", all_html)
+            tex = (base / "out/tex/main.tex").read_text()
+            self.assertLess(tex.index("\\section{After appendix}"), tex.index("\\appendix"))
+            self.assertLess(tex.index("\\appendix"), tex.index("\\section{Supplementary Results}"))
+            self.assertIn("\\begin{theorem}[Appended theorem]", tex)
+            self.assertNotIn("--myne:appendix_", tex)
+
+    def test_appendix_uses_configured_web_top_level(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text(
+                'root = "main.lean"\n'
+                '[web]\npageHeading = "subsection"\n'
+            )
+            (base / "main.lean").write_text(
+                "/-! # Appendix headings -/\n"
+                "--myne:appendix_start Supplemental proofs\n"
+                "/-! Proof details. -/\n"
+                "--myne:appendix_end\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            appendix = (base / "out/html/subsection-001.html").read_text()
+            self.assertIn("Appendix: Supplemental proofs", appendix)
+            self.assertIn("nav-depth-0 heading-subsection", appendix)
+
+    def test_appendix_markers_reject_unmatched_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\n')
+            source = base / "main.lean"
+            source.write_text("--myne:appendix_end\n/-! # Invalid -/\n")
+            result = run(cwd=base)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("appendix_end without appendix_start", result.stderr)
+            source.write_text("--myne:appendix_start Missing end\n/-! # Invalid -/\n")
+            result = run(cwd=base)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing --myne:appendix_end", result.stderr)
+
+    def test_declaration_map_rejects_invalid_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "main.lean").write_text('/-! # Invalid -/\n')
+            (base / "myne.toml").write_text(
+                'root = "main.lean"\n[declarationMap]\n"def∇" = "axiom"\n'
+            )
+            result = run(cwd=base)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("declarationMap", result.stderr)
+
     def test_basic_example(self) -> None:
         project = REPO / "examples/basic"
         result = run(cwd=project)

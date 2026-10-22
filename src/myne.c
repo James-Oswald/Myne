@@ -30,7 +30,7 @@
 #define MAX_SEGS 4096
 #define MAX_BIB 512
 
-enum { SEG_TEXT, SEG_CODE, SEG_BOX_OPEN, SEG_BOX_CLOSE };
+enum { SEG_TEXT, SEG_CODE, SEG_BOX_OPEN, SEG_BOX_CLOSE, SEG_APPENDIX_START };
 
 enum { LEAN_CODE, LEAN_DEF, LEAN_LEMMA, LEAN_THEOREM };
 
@@ -67,16 +67,23 @@ typedef struct {
     char *from, *to;
 } Mapping;
 
+typedef struct {
+    char *from;
+    int kind;
+} DeclarationMapping;
+
 static File files[MAX_FILES];
 static int nfiles;
-static Segment segs[MAX_SEGS];
-static int nsegs;
+static Segment segs[MAX_SEGS], appendix_segs[MAX_SEGS];
+static int nsegs, nappendix_segs, appendix_capture;
 static Page pages[MAX_PAGES];
 static int npages, current, part, bib_page;
 static Bib bibs[MAX_BIB];
 static int nbibs, ncites;
 static Mapping maps[64];
 static int nmaps;
+static DeclarationMapping declaration_maps[64];
+static int ndeclaration_maps;
 static char basedir[PATH_MAX], output[PATH_MAX], config_path[PATH_MAX];
 static char *root, *format, *style, *tex_template, *tex_class, *page_heading, *bibcfg[64];
 static int nbibcfg;
@@ -133,6 +140,20 @@ static int lean_kind(const char *s, size_t n) {
         if (!found) {
             break;
         }
+    }
+    int mapped = LEAN_CODE;
+    size_t longest = 0;
+    for (int j = 0; j < ndeclaration_maps; j++) {
+        size_t len = strlen(declaration_maps[j].from);
+        if (len > longest && i + len <= n &&
+            !memcmp(s + i, declaration_maps[j].from, len) &&
+            (i + len == n || isspace((unsigned char)s[i + len]))) {
+            longest = len;
+            mapped = declaration_maps[j].kind;
+        }
+    }
+    if (longest) {
+        return mapped;
     }
     const char *definitions[] = {"def", "abbrev", "opaque", "structure", "class", "inductive"};
     for (size_t j = 0; j < sizeof(definitions) / sizeof(*definitions); j++) {
@@ -765,6 +786,9 @@ static void clear_project(void) {
     for (int i = 0; i < nsegs; i++) {
         free(segs[i].s);
     }
+    for (int i = 0; i < nappendix_segs; i++) {
+        free(appendix_segs[i].s);
+    }
     for (int i = 0; i < npages; i++) {
         free(pages[i].title);
         free(pages[i].slug);
@@ -780,7 +804,8 @@ static void clear_project(void) {
         free(bibs[i].title);
         free(bibs[i].year);
     }
-    nfiles = nsegs = npages = nbibs = ncites = nfoot = 0;
+    nfiles = nsegs = nappendix_segs = npages = nbibs = ncites = nfoot = 0;
+    appendix_capture = 0;
     current = part = 0;
     chapter_number = section_number = subsection_number = subsubsection_number = 0;
     chapter_active = statement_number = 0;
@@ -789,33 +814,88 @@ static void clear_project(void) {
     failed = 0;
 }
 
-/* Parse the documented manifest keys and literal commandMap table. */
+/* Find the assignment delimiter without confusing it with a quoted map key. */
+static char *config_equals(char *line) {
+    char quote = 0;
+    int escaped = 0;
+    for (char *p = line; *p; p++) {
+        if (quote) {
+            if (escaped) {
+                escaped = 0;
+            } else if (*p == '\\') {
+                escaped = 1;
+            } else if (*p == quote) {
+                quote = 0;
+            }
+        } else if (*p == '"' || *p == '\'') {
+            quote = *p;
+        } else if (*p == '=') {
+            return p;
+        }
+    }
+    return NULL;
+}
+
+/* Parse the documented manifest keys and mapping tables. */
 static void load_config(const char *path) {
     char *data = read_all(path);
     if (!data) {
         return;
     }
-    int inmap = 0;
+    enum { CONFIG_MAIN, CONFIG_COMMAND_MAP, CONFIG_DECLARATION_MAP } table = CONFIG_MAIN;
     for (char *line = strtok(data, "\n"); line; line = strtok(NULL, "\n")) {
         char *p = trim(line);
         if (!*p || *p == '#') {
             continue;
         }
         if (*p == '[') {
-            inmap = !strncmp(p, "[commandMap]", 12);
+            table = !strcmp(p, "[commandMap]") ? CONFIG_COMMAND_MAP
+                    : !strcmp(p, "[declarationMap]") ? CONFIG_DECLARATION_MAP
+                    : CONFIG_MAIN;
             continue;
         }
-        char *eq = strchr(p, '=');
+        char *eq = config_equals(p);
         if (!eq) {
             continue;
         }
         *eq++ = 0;
         char *key = trim(p), *value = trim(eq);
-        if (inmap) {
+        if (table == CONFIG_COMMAND_MAP) {
             if (nmaps < 64) {
                 maps[nmaps].from = unquote(key);
                 maps[nmaps++].to = unquote(value);
             }
+            continue;
+        }
+        if (table == CONFIG_DECLARATION_MAP) {
+            size_t key_len = strlen(key);
+            if (key_len < 2 || (key[0] != '"' && key[0] != '\'') ||
+                key[key_len - 1] != key[0]) {
+                die("declarationMap keys must be quoted strings");
+                continue;
+            }
+            char *from = unquote(key), *to = unquote(value);
+            int kind = !strcmp(to, "def") ? LEAN_DEF
+                       : !strcmp(to, "lemma") ? LEAN_LEMMA
+                       : !strcmp(to, "theorem") ? LEAN_THEOREM : LEAN_CODE;
+            if (!*from || kind == LEAN_CODE) {
+                die("declarationMap entries need a nonempty key and def, lemma, or theorem value");
+            } else if (ndeclaration_maps == 64) {
+                die("too many declarationMap entries");
+            } else {
+                int duplicate = 0;
+                for (int j = 0; j < ndeclaration_maps; j++) {
+                    duplicate |= !strcmp(declaration_maps[j].from, from);
+                }
+                if (duplicate) {
+                    die("duplicate declarationMap key: %s", from);
+                } else {
+                    declaration_maps[ndeclaration_maps++] = (DeclarationMapping){from, kind};
+                    from = NULL;
+                }
+            }
+            free(from);
+            free(to);
             continue;
         }
         if (!strcmp(key, "root")) {
@@ -868,17 +948,68 @@ static void load_config(const char *path) {
     free(data);
 }
 
+/* Parse a standalone appendix marker and return its line's end. */
+static int appendix_directive(const char *s, size_t n, size_t i, size_t *next, char **name) {
+    if (i && s[i - 1] != '\n') {
+        return 0;
+    }
+    size_t line_end = i;
+    while (line_end < n && s[line_end] != '\n') {
+        line_end++;
+    }
+    size_t p = i;
+    while (p < line_end && (s[p] == ' ' || s[p] == '\t' || s[p] == '\r')) {
+        p++;
+    }
+    static const char start[] = "--myne:appendix_start";
+    static const char end[] = "--myne:appendix_end";
+    if (line_end - p >= sizeof(start) - 1 &&
+        !memcmp(s + p, start, sizeof(start) - 1) &&
+        (p + sizeof(start) - 1 == line_end || isspace((unsigned char)s[p + sizeof(start) - 1]))) {
+        p += sizeof(start) - 1;
+        while (p < line_end && isspace((unsigned char)s[p])) {
+            p++;
+        }
+        size_t tail = line_end;
+        while (tail > p && isspace((unsigned char)s[tail - 1])) {
+            tail--;
+        }
+        if (tail == p) {
+            die("--myne:appendix_start requires a name");
+            *next = line_end < n ? line_end + 1 : line_end;
+            return 1;
+        }
+        *name = slice(s + p, tail - p);
+        *next = line_end < n ? line_end + 1 : line_end;
+        return 1;
+    }
+    if (line_end - p >= sizeof(end) - 1 &&
+        !memcmp(s + p, end, sizeof(end) - 1)) {
+        p += sizeof(end) - 1;
+        while (p < line_end && isspace((unsigned char)s[p])) {
+            p++;
+        }
+        if (p == line_end) {
+            *next = line_end < n ? line_end + 1 : line_end;
+            return 2;
+        }
+    }
+    return 0;
+}
+
 /* Segments keep document order while distinguishing prose from Lean code. */
 static void segment(int kind, const char *s, size_t n) {
     if (!n && kind != SEG_BOX_CLOSE) {
         return;
     }
-    if (nsegs >= MAX_SEGS) {
+    Segment *target = appendix_capture ? appendix_segs : segs;
+    int *count = appendix_capture ? &nappendix_segs : &nsegs;
+    if (*count >= MAX_SEGS) {
         die("document has too many segments");
         return;
     }
-    segs[nsegs].kind = kind;
-    segs[nsegs++].s = slice(s, n);
+    target[*count].kind = kind;
+    target[(*count)++].s = slice(s, n);
 }
 
 static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_heading_seen);
@@ -946,9 +1077,32 @@ typedef struct {
 static LeanCodeEnd lean_code_end(const char *s, size_t n, size_t begin, int capture,
                                  const char *rel) {
     if (!capture) {
-        const char *stop = finds(s + begin, n - begin, "\n\n");
-        size_t end = stop ? (size_t)(stop - s) : n;
-        return (LeanCodeEnd){end, end};
+        for (size_t i = begin; i < n;) {
+            size_t line_end = i;
+            while (line_end < n && s[line_end] != '\n') {
+                line_end++;
+            }
+            size_t next = 0;
+            char *name = NULL;
+            int directive = appendix_directive(s, n, i, &next, &name);
+            free(name);
+            if (directive) {
+                size_t end = i;
+                while (end > begin && isspace((unsigned char)s[end - 1])) {
+                    end--;
+                }
+                return (LeanCodeEnd){end, i};
+            }
+            if (line_end < n && line_end + 1 < n && s[line_end + 1] == '\n') {
+                size_t end = line_end;
+                while (end > begin && isspace((unsigned char)s[end - 1])) {
+                    end--;
+                }
+                return (LeanCodeEnd){end, line_end + 1};
+            }
+            i = line_end < n ? line_end + 1 : line_end;
+        }
+        return (LeanCodeEnd){n, n};
     }
     int block_depth = 0, quoted = 0, escaped = 0;
     for (size_t i = begin; i < n;) {
@@ -1022,6 +1176,37 @@ static void flatten(int id, int depth) {
     }
     int top_heading_seen = 0;
     for (size_t i = 0; i < n;) {
+        size_t next = 0;
+        char *appendix_name = NULL;
+        int directive = appendix_directive(s, n, i, &next, &appendix_name);
+        if (directive) {
+            if (failed) {
+                free(appendix_name);
+                return;
+            }
+            if (directive == 1) {
+                if (appendix_capture) {
+                    die("nested --myne:appendix_start in %s", f->rel);
+                    free(appendix_name);
+                    return;
+                }
+                if (nappendix_segs >= MAX_SEGS) {
+                    die("document has too many appendix segments");
+                    free(appendix_name);
+                    return;
+                }
+                appendix_segs[nappendix_segs++] = (Segment){SEG_APPENDIX_START, appendix_name};
+                appendix_capture = 1;
+            } else {
+                if (!appendix_capture) {
+                    die("--myne:appendix_end without appendix_start in %s", f->rel);
+                    return;
+                }
+                appendix_capture = 0;
+            }
+            i = next;
+            continue;
+        }
         int doc =
             i + 3 <= n && s[i] == '/' && s[i + 1] == '-' && (s[i + 2] == '!' || s[i + 2] == '-');
         if (!doc) {
@@ -1148,9 +1333,42 @@ static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_h
 static void translate_lean(File *f, int isroot) {
     const char *s = f->data;
     size_t n = strlen(s);
-    Buf b = {0};
-    int top_heading_seen = 0;
+    Buf b = {0}, appendix_tex = {0};
+    int top_heading_seen = 0, appendix_open = 0, appendix_seen = 0;
     for (size_t i = 0; i < n;) {
+        size_t next = 0;
+        char *appendix_name = NULL;
+        int directive = appendix_directive(s, n, i, &next, &appendix_name);
+        if (directive) {
+            if (failed) {
+                free(appendix_name);
+                break;
+            }
+            if (directive == 1) {
+                if (appendix_open) {
+                    die("nested --myne:appendix_start in %s", f->rel);
+                    free(appendix_name);
+                    break;
+                }
+                if (!appendix_seen++) {
+                    add(&appendix_tex, "\\appendix\n");
+                }
+                add(&appendix_tex, "\\section{");
+                add(&appendix_tex, appendix_name);
+                add(&appendix_tex, "}\n");
+                appendix_open = 1;
+            } else {
+                if (!appendix_open) {
+                    die("--myne:appendix_end without appendix_start in %s", f->rel);
+                    break;
+                }
+                appendix_open = 0;
+            }
+            free(appendix_name);
+            i = next;
+            continue;
+        }
+        Buf *out = appendix_open ? &appendix_tex : &b;
         int doc =
             i + 3 <= n && s[i] == '/' && s[i + 1] == '-' && (s[i + 2] == '!' || s[i + 2] == '-');
         if (!doc) {
@@ -1190,38 +1408,43 @@ static void translate_lean(File *f, int isroot) {
                 int declaration = lean_kind(s + begin, boundary.end - begin);
                 const char *environment = lean_environment(declaration);
                 if (environment) {
-                    add(&b, "\n\\begin{");
-                    add(&b, environment);
+                    add(out, "\n\\begin{");
+                    add(out, environment);
                     if (doc.name.n) {
                         size_t name_len = lean_doc_trimmed_len(&doc.name);
-                        add(&b, "}[");
-                        addn(&b, doc.name.s, name_len);
-                        add(&b, "]\n");
+                        add(out, "}[");
+                        addn(out, doc.name.s, name_len);
+                        add(out, "]\n");
                     } else {
-                        add(&b, "}\n");
+                        add(out, "}\n");
                     }
                     f->has_boxes = 1;
                 }
                 if (doc.annotated) {
                     Buf body = {0};
                     lean_doc_body(&body, &doc, declaration, 1);
-                    markdown_tex(&b, body.s ? body.s : "", body.n, isroot, &top_heading_seen);
+                    markdown_tex(out, body.s ? body.s : "", body.n, isroot, &top_heading_seen);
                     free(body.s);
                 } else {
-                    markdown_tex(&b, s + start, j - start, isroot, &top_heading_seen);
+                    markdown_tex(out, s + start, j - start, isroot, &top_heading_seen);
                 }
                 if (environment) {
-                    add(&b, "\n\\end{");
-                    add(&b, environment);
-                    add(&b, "}\n");
+                    add(out, "\n\\end{");
+                    add(out, environment);
+                    add(out, "}\n");
                 }
                 lean_doc_free(&doc);
                 continue;
             }
             lean_doc_free(&doc);
         }
-        markdown_tex(&b, s + start, j - start, isroot, &top_heading_seen);
+        markdown_tex(out, s + start, j - start, isroot, &top_heading_seen);
     }
+    if (appendix_open) {
+        die("missing --myne:appendix_end in %s", f->rel);
+    }
+    add(&b, appendix_tex.s ? appendix_tex.s : "");
+    free(appendix_tex.s);
     f->tex = b.s ? b.s : xstrdup("");
 }
 
@@ -2589,6 +2812,17 @@ static int build(void) {
     }
     translate_parallel();
     flatten(root_index, 0);
+    if (appendix_capture) {
+        die("missing --myne:appendix_end");
+    }
+    for (int i = 0; i < nappendix_segs && !failed; i++) {
+        if (nsegs >= MAX_SEGS) {
+            die("document has too many segments");
+            break;
+        }
+        segs[nsegs++] = appendix_segs[i];
+        appendix_segs[i].s = NULL;
+    }
     if (failed) {
         return -1;
     }
@@ -2639,6 +2873,14 @@ static int build(void) {
                 code_html(segs[i].s);
             } else if (segs[i].kind == SEG_BOX_CLOSE) {
                 add(&pages[current].body, "</div>");
+            } else if (segs[i].kind == SEG_APPENDIX_START) {
+                Buf title = {0}, number = {0};
+                add(&title, "Appendix: ");
+                add(&title, segs[i].s);
+                number_heading(&number, page_heading_level);
+                new_page(title.s, page_heading_level, number.s);
+                free(title.s);
+                free(number.s);
             } else {
                 char *mapped = replace_map(segs[i].s);
                 text_html(mapped);

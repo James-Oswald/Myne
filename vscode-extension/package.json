@@ -1,0 +1,34 @@
+{
+  "name": "myne-katex-preview",
+  "displayName": "Myne KaTeX Preview",
+  "description": "Live KaTeX math preview for Myne, Lean, Markdown, and LaTeX files.",
+  "version": "0.1.0",
+  "publisher": "james-oswald",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "scripts": {
+    "prepare-assets": "node ./scripts/prepare-assets.js"
+  },
+  "categories": ["Visualization"],
+  "main": "./extension.js",
+  "activationEvents": ["onCommand:myne.openKatexPreview"],
+  "files": ["extension.js", "media/**", "README.md", "NOTICE.md"],
+  "contributes": {
+    "commands": [
+      {
+        "command": "myne.openKatexPreview",
+        "title": "Myne: Open KaTeX Preview"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "myne.openKatexPreview",
+          "when": "resourceExtname == .lean || resourceExtname == .tex || resourceExtname == .md",
+          "group": "navigation"
+        }
+      ]
+    }
+  }
+}
