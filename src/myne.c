@@ -2221,7 +2221,7 @@ static void nav_html(Buf *b, int active) {
     if (root_heading == 7) {
         root_heading = page_heading_level;
     }
-    add(b, "<nav aria-label=\"Table of contents\"><a class=nav-title href=\"index.html\">");
+    add(b, "<nav class=toc-nav aria-label=\"Table of contents\"><a class=nav-title href=\"index.html\">");
     escape(b, doc_title ? doc_title : "Myne");
     add(b, "</a>");
     for (int i = 0; i < npages; i++) {
@@ -2261,6 +2261,23 @@ static void nav_html(Buf *b, int active) {
                "aria-pressed=\"false\">Dark mode</button>");
     }
     add(b, "</nav>");
+}
+
+static void header_html(Buf *b) {
+    add(b, "<header class=site-header><a class=site-title href=\"index.html\">");
+    escape(b, doc_title ? doc_title : "Myne");
+    add(b, "</a><nav class=header-actions aria-label=\"Document actions\">");
+    if (!strcmp(format, "both")) {
+        char *pdf = tex_name(files[root_index].rel);
+        if (ends(pdf, ".tex")) {
+            strcpy(pdf + strlen(pdf) - 4, ".pdf");
+        }
+        add(b, "<a class=header-action href=\"../tex/");
+        escape(b, pdf);
+        add(b, "\">PDF</a>");
+        free(pdf);
+    }
+    add(b, "</nav></header>");
 }
 
 static void write_html(const char *dir) {
@@ -2312,6 +2329,7 @@ static void write_html(const char *dir) {
                    "src=\"runtime.js\"></script></head><body data-style=\"");
         escape(&html, custom ? "custom" : style);
         add(&html, live ? "\" data-live=\"1\">" : "\" data-live=\"0\">");
+        header_html(&html);
         nav_html(&html, i);
         add(&html, "<main><h1>");
         if (pages[i].number) {
@@ -2498,6 +2516,22 @@ static int build(void) {
         remove_tree(dummy);
         free(dummy);
     }
+    if (!failed && !strcmp(format, "both")) {
+        char *pdf = tex_name(files[root_index].rel);
+        if (ends(pdf, ".tex")) {
+            strcpy(pdf + strlen(pdf) - 4, ".pdf");
+        }
+        char *old_tex = join(output, "tex"), *old_pdf = join(old_tex, pdf);
+        char *new_pdf = join(tex, pdf);
+        struct stat st;
+        if (!stat(old_pdf, &st) && S_ISREG(st.st_mode) && copy_file(old_pdf, new_pdf)) {
+            die("cannot preserve generated PDF %s", old_pdf);
+        }
+        free(pdf);
+        free(old_tex);
+        free(old_pdf);
+        free(new_pdf);
+    }
     if (!failed) {
         if (strcmp(format, "tex")) {
             char *final = join(output, "html");
@@ -2600,6 +2634,9 @@ static const char *mime(const char *s) {
     if (ends(s, ".svg")) {
         return "image/svg+xml";
     }
+    if (ends(s, ".pdf")) {
+        return "application/pdf";
+    }
     return "application/octet-stream";
 }
 
@@ -2660,7 +2697,9 @@ static void *server_thread(void *unused) {
                 safe = 0;
             }
         }
-        char *base = join(output, "html"), *file = safe ? join(base, path) : NULL;
+        int pdf_file = !strncmp(path, "tex/", 4) && ends(path, ".pdf");
+        char *base = join(output, pdf_file ? "tex" : "html");
+        char *file = safe ? join(base, pdf_file ? path + 4 : path) : NULL;
         free(base);
         struct stat st;
         int ok = file && !stat(file, &st) && S_ISREG(st.st_mode);
