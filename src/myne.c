@@ -101,6 +101,7 @@ typedef struct {
     Buf body, notes, toc;
     int toc_count;
     int part, heading;
+    int appendix_group, appendix;
 } Page;
 
 typedef struct {
@@ -3186,7 +3187,8 @@ static void write_tex(const char *dir) {
 static void nav_html(Buf *b, int active) {
     int root_heading = 7;
     for (int i = 1; i < npages; i++) {
-        if (pages[i].heading >= 2 && pages[i].heading < root_heading) {
+        if (!pages[i].appendix_group && pages[i].heading >= 2 &&
+            pages[i].heading < root_heading) {
             root_heading = pages[i].heading;
         }
     }
@@ -3211,8 +3213,9 @@ static void nav_html(Buf *b, int active) {
             depth = 4;
         }
         char nav_class[80];
-        snprintf(nav_class, sizeof(nav_class), "nav-entry nav-depth-%d heading-%s ", depth,
-                 heading_name(pages[i].heading));
+        snprintf(nav_class, sizeof(nav_class), "nav-entry nav-depth-%d heading-%s%s ", depth,
+                 heading_name(pages[i].heading),
+                 pages[i].appendix_group ? " appendix-group" : "");
         add(b, nav_class);
         if (pages[i].heading == 2) {
             add(b, "part");
@@ -3519,6 +3522,20 @@ static void write_html(const char *dir) {
             }
             add(&html, "</ul>");
         }
+        if (pages[i].appendix_group) {
+            add(&html, "<ul class=part-list>");
+            for (int j = i + 1; j < npages; j++) {
+                if (!pages[j].appendix) {
+                    continue;
+                }
+                add(&html, "<li><a href=\"");
+                escape(&html, pages[j].slug);
+                add(&html, "\">");
+                escape(&html, pages[j].title);
+                add(&html, "</a></li>");
+            }
+            add(&html, "</ul>");
+        }
         if (pages[i].notes.n) {
             add(&html, "<aside class=mobile-notes><h2>Notes</h2><ol>");
             addn(&html, pages[i].notes.s, pages[i].notes.n);
@@ -3613,6 +3630,8 @@ static int build(void) {
         if (failed) return -1;
         dependency_prune();
         new_page("Introduction", 0, NULL);
+        int appendix_group_created = 0;
+        int appendix_number = 0;
         for (int i = 0; i < nsegs; i++) {
             if (segs[i].kind == SEG_BOX_OPEN) {
                 const char *kind = segs[i].s;
@@ -3662,11 +3681,33 @@ static int build(void) {
             } else if (segs[i].kind == SEG_BOX_CLOSE) {
                 add(&pages[current].body, "</div>");
             } else if (segs[i].kind == SEG_APPENDIX_START) {
+                if (!appendix_group_created) {
+                    new_page("Appendices", page_heading_level, NULL);
+                    pages[current].appendix_group = 1;
+                    appendix_group_created = 1;
+                }
                 Buf title = {0}, number = {0};
+                char label[32];
+                appendix_number++;
+                int value = appendix_number;
+                char reversed[32];
+                int digits = 0;
+                while (value > 0 && digits < (int)sizeof(reversed)) {
+                    value--;
+                    reversed[digits++] = (char)('A' + value % 26);
+                    value /= 26;
+                }
+                int pos = 0;
+                while (digits > 0 && pos < (int)sizeof(label) - 1) {
+                    label[pos++] = reversed[--digits];
+                }
+                label[pos] = 0;
                 add(&title, "Appendix: ");
                 add(&title, segs[i].s);
-                number_heading(&number, page_heading_level);
+                add(&number, label);
+                set_statement_scope(label);
                 new_page(title.s, page_heading_level, number.s);
+                pages[current].appendix = 1;
                 free(title.s);
                 free(number.s);
             } else {

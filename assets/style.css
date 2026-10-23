@@ -48,6 +48,12 @@ a { color: #295c9a; }
 .toc-nav a { display: block; padding: 0.25rem 0; text-decoration: none; }
 .toc-nav .nav-title { margin-bottom: 0.8rem; font-weight: 700; }
 .toc-nav .nav-entry { border-left: 1px solid transparent; padding-left: 0.45rem; }
+.toc-nav .appendix-group {
+    margin-top: 0.8rem;
+    padding-left: 0;
+    font: inherit;
+    font-weight: 700;
+}
 .toc-nav .nav-depth-1 { margin-left: 0.8rem; }
 .toc-nav .nav-depth-2 { margin-left: 1.6rem; }
 .toc-nav .nav-depth-3 { margin-left: 2.4rem; }
