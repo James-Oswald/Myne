@@ -1,0 +1,33 @@
+name: Test Myne PDF action
+
+on:
+  pull_request:
+    paths:
+      - .github/actions/build-myne/action.yml
+      - .github/workflows/build-action-pdf.yml
+      - examples/basic/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pdf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build sample site and PDF
+        id: build
+        uses: ./.github/actions/build-myne
+        with:
+          project-directory: examples/basic
+          build-pdf: true
+          tex-main-file: sample.tex
+      - name: Check PDF and published link
+        env:
+          SITE_DIRECTORY: ${{ steps.build.outputs.site-directory }}
+          PDF_FILE: ${{ steps.build.outputs.pdf-file }}
+        run: |
+          test -s "$PDF_FILE"
+          test "$PDF_FILE" = "$SITE_DIRECTORY/sample.pdf"
+          grep -q 'href="sample.pdf"' "$SITE_DIRECTORY/index.html"
