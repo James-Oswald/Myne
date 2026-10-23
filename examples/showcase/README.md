@@ -1,6 +1,6 @@
 # Feature showcase
 
-Run `../../myne` here to render `main.lean` to HTML and TeX. The example
+Run `../../bin/myne` here to render `main.lean` to HTML and TeX. The example
 demonstrates a Lean root and included chapter, headings, inline and display
 math, a footnote, a citation and bibliography, a custom web style, a TeX
 template, annotated statements, and `@capture block` with `--myne:end`.

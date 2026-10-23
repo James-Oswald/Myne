@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import http.client
+import os
 from pathlib import Path
 import shutil
 import socket
@@ -11,7 +12,7 @@ import time
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
-MYNE = REPO / "myne"
+MYNE = REPO / "bin" / ("myne.exe" if os.name == "nt" else "myne")
 
 
 def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:

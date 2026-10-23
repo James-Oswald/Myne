@@ -10,15 +10,16 @@ CPPFLAGS += -Ivendor/stringzilla/include -DSZ_USE_NEON=0 -DSZ_USE_NEONAES=0 -DSZ
 LDLIBS += -lpthread
 
 ifeq ($(OS),Windows_NT)
-MYNE := myne.exe
+MYNE := bin/myne.exe
 LDFLAGS += -static
 LDLIBS += -lws2_32
 else
-MYNE := myne
+MYNE := bin/myne
 endif
+BIN_DIR := bin
 SOURCES := src/myne.c src/state.c src/project.c src/source.c src/dependencies.c \
            src/html_content.c src/html_output.c src/tex.c src/assets.c src/server.c
-OBJECTS := $(SOURCES:.c=.o)
+OBJECTS := $(patsubst src/%.c,$(BIN_DIR)/%.o,$(SOURCES))
 
 all: $(MYNE)
 
@@ -28,13 +29,17 @@ src/app_assets.inc: assets/style.css assets/runtime.js tools/embed_app.py
 src/katex_assets.inc: tools/embed_katex.py
 	python3 tools/embed_katex.py
 
-$(MYNE): $(OBJECTS)
+$(BIN_DIR):
+	mkdir -p $@
+
+$(MYNE): $(OBJECTS) | $(BIN_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJECTS) $(LDLIBS)
 
-src/%.o: src/%.c src/myne_internal.h
+
+$(BIN_DIR)/%.o: src/%.c src/myne_internal.h | $(BIN_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
-src/assets.o: src/app_assets.inc src/katex_assets.inc
+$(BIN_DIR)/assets.o: src/app_assets.inc src/katex_assets.inc
 
 pdfs: basic-pdf annotations-pdf thesis-pdf showcase-pdf
 
@@ -55,6 +60,7 @@ showcase-pdf: $(MYNE)
 	cd examples/showcase/out/tex && latexmk -pdf -quiet -interaction=nonstopmode -halt-on-error template.tex
 
 clean:
-	rm -f myne myne.exe $(OBJECTS) src/app_assets.inc src/katex_assets.inc
+	rm -rf $(BIN_DIR) src/app_assets.inc src/katex_assets.inc
+	rm -f myne myne.exe src/*.o
 
 .PHONY: all pdfs basic-pdf annotations-pdf thesis-pdf showcase-pdf clean

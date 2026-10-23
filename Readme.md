@@ -12,11 +12,11 @@ Myne complies to either TeX which can be compiled with standard LaTeX tools, or 
 
 After cloning, run `git submodule update --init --recursive`, then `make`. The first build downloads the pinned KaTeX browser archive and verifies its SHA-256 checksum; generated `.inc` files are ignored by Git. The Makefile compiles the C modules under `src/` and links them into one executable. It uses TCC when available and otherwise uses `cc`; override with `make CC=cc` or `make CC=tcc`. On Windows, use the native MinGW-w64 toolchain (for example, MSYS2 UCRT64 GCC and Make) and run `make`; this produces `myne.exe` without Cygwin. The same source tree also builds on Unix-like systems. KaTeX, fonts, and Myne's built-in CSS and JavaScript are embedded in the executable, so the binary generates offline HTML without a separate assets directory.
 
-From an example directory, run `../../myne`. Myne reads `myne.toml` in the current directory. For example:
+From an example directory, run `../../bin/myne`. Myne reads `myne.toml` in the current directory. For example:
 
 ```sh
 cd examples/basic
-../../myne
+../../bin/myne
 cd out/tex && latexmk -pdf -interaction=nonstopmode sample.tex
 ```
 
@@ -81,7 +81,7 @@ jobs:
 
 The generated directory can also be passed to another host's upload or deploy action through `steps.<build-step-id>.outputs.site-directory`. GitHub Pages requires `pages: write` and `id-token: write` on the deployment job; see [GitHub's Pages workflow guide](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
 
-`-i` also accepts a project directory. For example, `./myne -i examples/basic --serve` loads `examples/basic/myne.toml` and serves that project's output from the repository root.
+`-i` also accepts a project directory. For example, `./bin/myne -i examples/basic --serve` loads `examples/basic/myne.toml` and serves that project's output from the repository root.
 
 ## Visual Studio Code extension
 

@@ -98,7 +98,7 @@ runs:
           extra_args+=(--elaborated-deps)
         fi
 
-        "$RUNNER_TEMP/myne-source/myne" \
+        "$RUNNER_TEMP/myne-source/bin/myne" \
           -i "$project_dir" \
           -f "$format" \
           -o "$output_dir" \
