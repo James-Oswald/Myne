@@ -1,0 +1,32 @@
+#include "myne_internal.h"
+
+File files[MAX_FILES];
+int nfiles;
+Segment segs[MAX_SEGS], appendix_segs[MAX_SEGS];
+int nsegs, nappendix_segs, appendix_capture;
+Page pages[MAX_PAGES];
+int npages, current, part, bib_page;
+DependencyNode dependency_nodes[MAX_SEGS];
+int ndependency_nodes;
+LeanDependencyDecl *lean_dependency_decls;
+int nlean_dependency_decls, lean_dependency_cap;
+unsigned char *elaborated_edges;
+int elaborated_edge_width, elaborated_dependency_graph;
+Bib bibs[MAX_BIB];
+int nbibs, ncites;
+Mapping maps[64];
+int nmaps;
+DeclarationMapping declaration_maps[64];
+int ndeclaration_maps;
+char basedir[PATH_MAX], output[PATH_MAX];
+char *root, *format, *style, *tex_template, *tex_class, *page_heading, *bibcfg[64];
+int nbibcfg;
+int live, port = 8000, failed, root_index, tex_template_index = -1, tex_class_index = -1;
+int dark_mode_toggle = 1, page_heading_level, web_table_of_contents;
+int chapter_number, section_number, subsection_number, subsubsection_number;
+int chapter_active, statement_number;
+char statement_scope[64];
+volatile unsigned long epoch;
+pthread_mutex_t epoch_lock = PTHREAD_MUTEX_INITIALIZER;
+int nfoot;
+char *doc_title;

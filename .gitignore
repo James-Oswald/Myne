@@ -1,5 +1,6 @@
 /myne
 /myne.exe
+/src/*.o
 /out/
 /examples/*/out/
 /work-tmp/

@@ -126,7 +126,7 @@ class MyneTests(unittest.TestCase):
             self.assertEqual(tex.count('\\begin{lemma}'), 2)
             self.assertEqual(tex.count('\\begin{theorem}'), 1)
 
-    def test_named_appendix_markers_move_content_to_top_level_appendix(self) -> None:
+    def test_named_appendix_markers_group_pages_after_main_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             (base / "myne.toml").write_text(
@@ -149,15 +149,19 @@ class MyneTests(unittest.TestCase):
             html_dir = base / "out/html"
             main = (html_dir / "section-001.html").read_text()
             after = (html_dir / "section-002.html").read_text()
-            appendix = (html_dir / "section-003.html").read_text()
+            appendix_group = (html_dir / "section-003.html").read_text()
+            appendix = (html_dir / "section-004.html").read_text()
             all_html = "\n".join(p.read_text() for p in sorted(html_dir.glob("*.html")))
             self.assertIn("Main content", main)
             self.assertIn("This remains in the main text", after)
             self.assertNotIn("Appended theorem", after)
             self.assertIn(
-                "<h1><span class=heading-number>3</span> Appendix: Supplementary Results</h1>",
+                "<h1><span class=heading-number>A</span> Appendix: Supplementary Results</h1>",
                 appendix,
             )
+            self.assertIn("<h1>Appendices</h1>", appendix_group)
+            self.assertIn('href="section-004.html"', appendix_group)
+            self.assertIn("Theorem A.1", appendix)
             self.assertIn("Supplementary details", appendix)
             self.assertIn("Moved appendix prose", appendix)
             self.assertIn("lean-block theorem", appendix)
@@ -183,9 +187,12 @@ class MyneTests(unittest.TestCase):
             )
             result = run(cwd=base)
             self.assertEqual(result.returncode, 0, result.stderr)
-            appendix = (base / "out/html/subsection-001.html").read_text()
+            group = (base / "out/html/subsection-001.html").read_text()
+            appendix = (base / "out/html/subsection-002.html").read_text()
+            self.assertIn("<h1>Appendices</h1>", group)
             self.assertIn("Appendix: Supplemental proofs", appendix)
-            self.assertIn("nav-depth-0 heading-subsection", appendix)
+            self.assertIn("<span class=heading-number>A</span>", appendix)
+            self.assertIn("nav-depth-0 heading-subsection appendix-group", appendix)
 
     def test_appendix_markers_reject_unmatched_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
