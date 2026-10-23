@@ -1,5 +1,5 @@
 name: Build Myne site
-description: Build a Myne project as static HTML and optionally upload it for GitHub Pages.
+description: Build a Myne project as static HTML, optionally compile its PDF, and upload it for GitHub Pages.
 
 inputs:
   project-directory:
@@ -13,6 +13,17 @@ inputs:
     description: Output base directory relative to the workspace. HTML is written to its html subdirectory.
     required: false
     default: out
+  build-pdf:
+    description: Generate TeX and compile a PDF using a prebuilt TeX Live container.
+    required: false
+    default: 'false'
+  tex-main-file:
+    description: Main TeX file relative to the generated tex directory. Required when build-pdf is true.
+    required: false
+  elaborated-deps:
+    description: Use Lean to calculate precise declaration dependencies when building the site.
+    required: false
+    default: 'false'
   upload-pages-artifact:
     description: Upload the generated HTML for a later actions/deploy-pages step.
     required: false
@@ -22,6 +33,9 @@ outputs:
   site-directory:
     description: Absolute path to the generated static site directory.
     value: ${{ steps.build.outputs.site-directory }}
+  pdf-file:
+    description: Absolute path to the PDF copied into the static site, when build-pdf is true.
+    value: ${{ steps.package-pdf.outputs.pdf-file }}
 
 runs:
   using: composite
@@ -41,20 +55,35 @@ runs:
       shell: bash
       run: make -C "$RUNNER_TEMP/myne-source" CC=cc
 
-    - name: Build HTML
+    - name: Build HTML and optional TeX
       id: build
       shell: bash
       env:
         PROJECT_DIRECTORY: ${{ inputs.project-directory }}
         CONFIG_FILE: ${{ inputs.config-file }}
         OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+        BUILD_PDF: ${{ inputs.build-pdf }}
+        TEX_MAIN_FILE: ${{ inputs.tex-main-file }}
+        ELABORATED_DEPS: ${{ inputs.elaborated-deps }}
       run: |
         set -euo pipefail
         project_dir="$PROJECT_DIRECTORY"
         output_dir="$OUTPUT_DIRECTORY"
         [[ "$project_dir" = /* ]] || project_dir="$GITHUB_WORKSPACE/$project_dir"
         [[ "$output_dir" = /* ]] || output_dir="$GITHUB_WORKSPACE/$output_dir"
+        output_dir="$(realpath -m "$output_dir")"
         [[ -d "$project_dir" ]] || { echo "Project directory not found: $project_dir" >&2; exit 1; }
+
+        format=html
+        if [[ "$BUILD_PDF" == true ]]; then
+          format=both
+          [[ -n "$TEX_MAIN_FILE" ]] || { echo "tex-main-file is required when build-pdf is true" >&2; exit 1; }
+          [[ "$TEX_MAIN_FILE" == *.tex && "$TEX_MAIN_FILE" != /* ]] || { echo "tex-main-file must be a relative .tex path" >&2; exit 1; }
+          case "$output_dir" in
+            "$GITHUB_WORKSPACE"|"$GITHUB_WORKSPACE"/*) ;;
+            *) echo "PDF output-directory must be inside the workspace" >&2; exit 1 ;;
+          esac
+        fi
 
         config_args=()
         if [[ -n "$CONFIG_FILE" ]]; then
@@ -64,15 +93,83 @@ runs:
           config_args=(--config "$config_file")
         fi
 
+        extra_args=()
+        if [[ "$ELABORATED_DEPS" == true ]]; then
+          extra_args+=(--elaborated-deps)
+        fi
+
         "$RUNNER_TEMP/myne-source/myne" \
           -i "$project_dir" \
-          -f html \
+          -f "$format" \
           -o "$output_dir" \
-          "${config_args[@]}"
+          "${config_args[@]}" \
+          "${extra_args[@]}"
 
         site_dir="$output_dir/html"
         [[ -d "$site_dir" ]] || { echo "Myne did not create the expected site directory: $site_dir" >&2; exit 1; }
         echo "site-directory=$site_dir" >> "$GITHUB_OUTPUT"
+
+        if [[ "$BUILD_PDF" == true ]]; then
+          tex_dir="$output_dir/tex"
+          tex_file="$(realpath -m "$tex_dir/$TEX_MAIN_FILE")"
+          case "$tex_file" in
+            "$tex_dir"/*) ;;
+            *) echo "tex-main-file must stay inside the generated tex directory" >&2; exit 1 ;;
+          esac
+          [[ -f "$tex_file" ]] || { echo "Generated TeX file not found: $tex_file" >&2; exit 1; }
+          echo "tex-directory=$tex_dir" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Compile PDF with bundled TeX Live
+      if: ${{ inputs.build-pdf == 'true' }}
+      uses: xu-cheng/latex-action@v4
+      with:
+        root_file: ${{ inputs.tex-main-file }}
+        working_directory: ${{ steps.build.outputs.tex-directory }}
+        work_in_root_file_dir: 'true'
+
+    - name: Include PDF in static site
+      if: ${{ inputs.build-pdf == 'true' }}
+      id: package-pdf
+      shell: bash
+      env:
+        SITE_DIRECTORY: ${{ steps.build.outputs.site-directory }}
+        TEX_DIRECTORY: ${{ steps.build.outputs.tex-directory }}
+        TEX_MAIN_FILE: ${{ inputs.tex-main-file }}
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import html
+        import os
+        from pathlib import Path
+        import shutil
+
+        site = Path(os.environ['SITE_DIRECTORY'])
+        tex = Path(os.environ['TEX_DIRECTORY'])
+        pdf_rel = Path(os.environ['TEX_MAIN_FILE']).with_suffix('.pdf')
+        source = tex / pdf_rel
+        if not source.is_file():
+            raise SystemExit(f'Compiled PDF not found: {source}')
+
+        target = site / pdf_rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+        old_link = 'href="../tex/' + html.escape(pdf_rel.as_posix(), quote=True) + '"'
+        pages = list(site.rglob('*.html'))
+        if not pages:
+            raise SystemExit(f'No HTML pages found in {site}')
+        for page in pages:
+            content = page.read_text(encoding='utf-8')
+            if old_link not in content:
+                raise SystemExit(f'PDF link not found in {page}')
+            relative_pdf = Path(os.path.relpath(target, page.parent)).as_posix()
+            new_link = 'href="' + html.escape(relative_pdf, quote=True) + '"'
+            page.write_text(content.replace(old_link, new_link), encoding='utf-8')
+
+        with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+            print(f'pdf-file={target}', file=output)
+        PY
 
     - name: Upload GitHub Pages artifact
       if: ${{ inputs.upload-pages-artifact == 'true' }}
