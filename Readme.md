@@ -30,6 +30,19 @@ Run `myne [-i root|project-directory] [-f html|tex|both] [-o outputDir] [-s plai
 
 Use the [Myne build action](.github/actions/build-myne/action.yml) in a workflow to compile a project into static HTML. It checks out and builds Myne, then provides the generated site's absolute path as the `site-directory` output. Set `upload-pages-artifact: true` to upload that directory for GitHub Pages. Set `project-directory` to the folder containing your Myne project; optionally set `config-file` (relative to that folder) and `output-directory` (relative to the repository workspace, default `out`). The HTML is written to `<output-directory>/html`.
 
+To include a PDF, set `build-pdf: true` and `tex-main-file` to the main TeX file Myne generates (for example, `Final.tex`). The action generates HTML and TeX together, compiles the TeX with a prebuilt TeX Live container, copies the PDF into the HTML site, fixes the PDF links, and exposes its path as `pdf-file`. The PDF is included when `upload-pages-artifact` is true. The TeX container is downloaded on the runner; TeX packages are not installed with `apt-get` on each build. Set `elaborated-deps: true` if the dependency graph should use Lean elaboration; this requires Lean or Lake to be available in the job before invoking the action. PDF builds require an Ubuntu runner with Docker and an output directory inside the workspace.
+
+```yaml
+- uses: James-Oswald/Myne/.github/actions/build-myne@main
+  with:
+    project-directory: src
+    output-directory: myne-out
+    build-pdf: true
+    tex-main-file: Final.tex
+    elaborated-deps: true
+    upload-pages-artifact: true
+```
+
 This workflow builds the project in `docs/` and publishes it to GitHub Pages. Replace `docs` with your project folder. Enable GitHub Pages with **GitHub Actions** as the publishing source in repository settings.
 
 ```yaml
