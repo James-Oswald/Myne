@@ -191,6 +191,8 @@ body[data-graph-page] .site-header { flex: 0 0 auto; }
 .dependency-toolbar { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
 .dependency-toolbar button { border: 1px solid #aeb8c4; border-radius: 0.35rem; padding: 0.4rem 0.75rem; color: inherit; background: #f8fafc; font: inherit; cursor: pointer; }
 .dependency-toolbar button:hover { background: #e8eef5; }
+.graph-layout-label { display: inline-flex; align-items: center; gap: 0.35rem; font: 0.9rem system-ui, sans-serif; }
+.graph-layout-label select { border: 1px solid #aeb8c4; border-radius: 0.35rem; padding: 0.4rem 0.55rem; color: inherit; background: #f8fafc; font: inherit; }
 .graph-legend { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; margin-left: auto; font: 0.9rem system-ui, sans-serif; }
 .graph-legend i { width: 0.8rem; height: 0.8rem; border: 1px solid; border-radius: 0.2rem; }
 .legend-definition { background: #dbeafe; border-color: #2563eb !important; }
@@ -219,10 +221,7 @@ body[data-graph-page] .site-header { flex: 0 0 auto; }
 .dependency-name { fill: #17212b; text-anchor: middle; font: 600 14px system-ui, sans-serif; }
 .dependency-kind { fill: #3d4c5f; text-anchor: middle; font: 11px system-ui, sans-serif; }
 .dependency-link:focus { outline: none; }
-.dependency-link.is-active .dependency-node rect { stroke-width: 3.2; filter: brightness(0.94); }
-.dependency-link.is-dependency .dependency-node rect { stroke-width: 3; }
 .dependency-edge.is-highlighted { stroke: #2563eb; stroke-width: 3; opacity: 1; }
-.dependency-edge.is-highlighted + .dependency-edge { opacity: 1; }
 .dependency-tooltip { position: fixed; z-index: 1000; max-width: min(32rem, calc(100vw - 2rem)); max-height: min(60vh, 28rem); overflow: auto; padding: 0.8rem 1rem; border: 1px solid #64748b; border-radius: 0.5rem; background: #fff; color: #17212b; box-shadow: 0 8px 28px #0f172a40; font: 0.92rem/1.45 system-ui, sans-serif; pointer-events: none; }
 .dependency-tooltip[hidden] { display: none; }
 .dependency-tooltip-field + .dependency-tooltip-field { margin-top: 0.6rem; padding-top: 0.55rem; border-top: 1px solid #d7dee7; }
@@ -275,6 +274,7 @@ body[data-style=hutter] .lean-code { background: transparent; }
 }
 :root[data-theme=dark] .dependency-scroll { background: #161c23; border-color: #465465; }
 :root[data-theme=dark] .graph-warning { border-color: #fbbf24; background: #382b12; color: #ffebbf; }
+:root[data-theme=dark] .graph-layout-label select { border-color: #536273; background: #202a35; }
 :root[data-theme=dark] .dependency-edge { stroke: #a8b5c3; }
 :root[data-theme=dark] .dependency-arrow { fill: #a8b5c3; }
 :root[data-theme=dark] .dependency-toolbar button { background: #202a35; border-color: #526172; }
@@ -345,3 +345,32 @@ body[data-style=hutter] .lean-code { background: transparent; }
     .dependency-scroll { min-height: 55vh; }
     .graph-legend { margin-left: 0; }
 }
+
+.dependency-panel-layer { pointer-events: none; }
+.dependency-section-panel > rect { fill: hsl(var(--panel-hue) 65% 94%); stroke: hsl(var(--panel-hue) 48% 55%); stroke-width: 2; }
+.dependency-section-title { color: hsl(var(--panel-hue) 45% 28%); font: 700 17px system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root[data-theme=dark] .dependency-section-panel > rect { fill: hsl(var(--panel-hue) 28% 18%); stroke: hsl(var(--panel-hue) 45% 55%); }
+:root[data-theme=dark] .dependency-section-title { color: hsl(var(--panel-hue) 65% 82%); }
+
+.dependency-graph[data-layout=sections] .dependency-edge:not(.is-highlighted) { opacity: 0.12; stroke-width: 1; }
+
+/* Dependency emphasis stays visible over node colors and crossed edges. */
+.dependency-edge.is-highlighted { stroke: #1d4ed8; stroke-width: 4; opacity: 1; }
+.dependency-arrow-highlight { fill: #1d4ed8; }
+:root[data-theme=dark] .dependency-edge.is-highlighted { stroke: #93c5fd; }
+:root[data-theme=dark] .dependency-arrow-highlight { fill: #93c5fd; }
+
+.dependency-arrow, .dependency-arrow-highlight { stroke: none; }
+
+/* Keep declaration kinds distinct while selected or highlighted as dependencies. */
+.dependency-definition { --highlight-fill: #cffafe; --highlight-stroke: #0891b2; --highlight-glow: #06b6d4aa; --highlight-text: #083344; --highlight-kind: #155e75; }
+.dependency-lemma { --highlight-fill: #bbf7d0; --highlight-stroke: #15803d; --highlight-glow: #22c55eaa; --highlight-text: #052e16; --highlight-kind: #166534; }
+.dependency-theorem { --highlight-fill: #fde68a; --highlight-stroke: #b45309; --highlight-glow: #f59e0baa; --highlight-text: #451a03; --highlight-kind: #92400e; }
+:root[data-theme=dark] .dependency-definition { --highlight-fill: #164e63; --highlight-stroke: #67e8f9; --highlight-glow: #22d3eeaa; --highlight-text: #ecfeff; --highlight-kind: #a5f3fc; }
+:root[data-theme=dark] .dependency-lemma { --highlight-fill: #14532d; --highlight-stroke: #86efac; --highlight-glow: #4ade80aa; --highlight-text: #f0fdf4; --highlight-kind: #bbf7d0; }
+:root[data-theme=dark] .dependency-theorem { --highlight-fill: #78350f; --highlight-stroke: #fcd34d; --highlight-glow: #fbbf24aa; --highlight-text: #fffbeb; --highlight-kind: #fde68a; }
+.dependency-link:is(.is-dependency, .is-active) .dependency-node rect { fill: var(--highlight-fill); stroke: var(--highlight-stroke); stroke-width: 4.5; filter: drop-shadow(0 0 5px var(--highlight-glow)); }
+.dependency-link.is-active .dependency-node rect { stroke-width: 5.5; }
+.dependency-link:is(.is-dependency, .is-active) .dependency-name { fill: var(--highlight-text); font-weight: 800; }
+.dependency-link:is(.is-dependency, .is-active) .dependency-kind { fill: var(--highlight-kind); }
+:root[data-theme=dark] .dependency-link:is(.is-dependency, .is-active) .dependency-node rect { filter: drop-shadow(0 0 6px var(--highlight-glow)); }

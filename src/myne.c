@@ -3360,21 +3360,27 @@ static void dependency_graph_html(const char *dir) {
                    "<code>--elaborated-deps</code> for Lean's elaborated dependencies.</aside>");
     }
     add(&html, "<p class=graph-help>Arrows point from prerequisites toward the declarations "
-               "they build. Only declarations in this Myne document become nodes. Click a node "
-               "to open it; drag nodes or the background to rearrange and pan.</p><div "
+               "they build. Only declarations in this Myne document become nodes. Click once "
+               "to select a node and keep its dependencies highlighted. Right-click or press "
+               "Escape to clear selection; double-click to open its declaration. Drag nodes or "
+               "the background to rearrange and pan.</p><div "
                "class=dependency-toolbar role=toolbar aria-label=\"Graph controls\"><button "
                "type=button data-graph-action=zoom-out aria-label=\"Zoom out\">−</button><button "
                "type=button data-graph-action=zoom-in aria-label=\"Zoom in\">+</button><button "
                "type=button data-graph-action=fit>Fit graph</button><button type=button "
-               "data-graph-action=reset>Reset layout</button><button type=button "
+               "data-graph-action=reset>Reset layout</button><label class=graph-layout-label>Layout "
+               "<select data-graph-action=layout aria-label=\"Graph layout\"><option "
+               "value=layered>Layered</option><option value=sections>Section panels</option></select>"
+               "</label><button type=button "
                "data-graph-action=direction>Top to bottom</button><span class=graph-legend>"
                "<i class=legend-definition></i> Definitions <i class=legend-lemma></i> Lemmas "
                "<i class=legend-theorem></i> Theorems</span></div><div "
                "class=dependency-scroll><svg class=dependency-graph role=img aria-label=\"Lean "
                "declaration dependency graph\" viewBox=\"0 0 1200 800\"><defs><marker id=\"dep-arrow\" "
-               "markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\"><path "
+               "markerUnits=\"userSpaceOnUse\" viewBox=\"0 0 8 8\" markerWidth=\"10\" markerHeight=\"10\" "
+               "refX=\"8\" refY=\"4\" orient=\"auto\"><path "
                "d=\"M0,0 L8,4 L0,8 z\" class=dependency-arrow></path></marker></defs><g "
-               "class=dependency-edges\">");
+               "class=\"dependency-edges\">");
     for (int i = 0; i < ndependency_nodes; i++) {
         for (int j = 0; j < ndependency_nodes; j++) {
             if (dependency_edge(i, j)) {
@@ -3403,6 +3409,10 @@ static void dependency_graph_html(const char *dir) {
         add(&html, id);
         add(&html, "\" aria-label=\"Open ");
         escape(&html, node->doc_name ? node->doc_name : node->name);
+        add(&html, "\" data-section-id=\"");
+        escape(&html, node->slug ? node->slug : "index.html");
+        add(&html, "\" data-section=\"");
+        escape(&html, node->page >= 0 && node->page < npages ? pages[node->page].title : "Declarations");
         add(&html, "\" data-doc-name=\"");
         escape(&html, node->doc_name ? node->doc_name : node->name);
         add(&html, "\" data-doc-nl=\"");

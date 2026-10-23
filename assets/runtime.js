@@ -35,10 +35,24 @@ document.addEventListener('DOMContentLoaded',()=>{
     }));
     const outgoing=Array.from({length:count},()=>[]),incoming=Array.from({length:count},()=>[]);
     for(const edge of edges){outgoing[edge.from].push(edge.to);incoming[edge.to].push(edge.from);}
+    const edgeLayer=dependencyGraph.querySelector('.dependency-edges');
+    const highlightedEdges=document.createElementNS('http://www.w3.org/2000/svg','g');
+    highlightedEdges.setAttribute('class','dependency-highlighted-edges');
+    highlightedEdges.setAttribute('pointer-events','none');
+    dependencyGraph.append(highlightedEdges);
+    const highlightedArrow=dependencyGraph.querySelector('#dep-arrow').cloneNode(true);
+    highlightedArrow.id='dep-arrow-highlight';
+    highlightedArrow.querySelector('path').setAttribute('class','dependency-arrow-highlight');
+    dependencyGraph.querySelector('defs').append(highlightedArrow);
     const tooltip=document.querySelector('.dependency-tooltip');
+    let selectedAnchor=null;
     const clearHover=()=>{
       for(const node of nodes)node.element.parentElement.classList.remove('is-active','is-dependency');
-      for(const edge of edges)edge.element.classList.remove('is-highlighted');
+      for(const edge of edges){
+        edge.element.classList.remove('is-highlighted');
+        edge.element.setAttribute('marker-end','url(#dep-arrow)');
+        edgeLayer.append(edge.element);
+      }
       if(tooltip){tooltip.hidden=true;tooltip.replaceChildren();}
     };
     const showHover=(anchor,event)=>{
@@ -49,6 +63,8 @@ document.addEventListener('DOMContentLoaded',()=>{
       for(const edge of edges){
         if(edge.to===active.index){
           edge.element.classList.add('is-highlighted');
+          edge.element.setAttribute('marker-end','url(#dep-arrow-highlight)');
+          highlightedEdges.append(edge.element);
           nodes[edge.from]?.element.parentElement.classList.add('is-dependency');
         }
       }
@@ -77,18 +93,23 @@ document.addEventListener('DOMContentLoaded',()=>{
     };
     dependencyGraph.addEventListener('pointerover',event=>{
       const anchor=event.target.closest('.dependency-link');
-      if(anchor)showHover(anchor,event);
+      if(anchor&&!selectedAnchor)showHover(anchor,event);
     });
-    dependencyGraph.addEventListener('pointermove',event=>{if(!tooltip?.hidden)positionTooltip(event);});
+    dependencyGraph.addEventListener('pointermove',event=>{if(!selectedAnchor&&!tooltip?.hidden)positionTooltip(event);});
     dependencyGraph.addEventListener('pointerout',event=>{
       const anchor=event.target.closest('.dependency-link');
-      if(anchor&&!anchor.contains(event.relatedTarget))clearHover();
+      if(anchor&&!selectedAnchor&&!anchor.contains(event.relatedTarget))clearHover();
     });
     dependencyGraph.addEventListener('focusin',event=>{
-      const anchor=event.target.closest('.dependency-link');if(anchor)showHover(anchor);
+      const anchor=event.target.closest('.dependency-link');if(anchor&&!selectedAnchor)showHover(anchor);
     });
     dependencyGraph.addEventListener('focusout',event=>{
-      if(event.target.closest('.dependency-link'))clearHover();
+      if(event.target.closest('.dependency-link')&&!selectedAnchor)clearHover();
+    });
+    dependencyGraph.addEventListener('contextmenu',event=>{
+      event.preventDefault();
+      selectedAnchor=null;
+      clearHover();
     });
 
     // Tarjan SCCs condense accidental cycles into single DAG layers.
@@ -125,6 +146,19 @@ document.addEventListener('DOMContentLoaded',()=>{
     const layers=[];
     for(const node of nodes)(layers[node.rank]||(layers[node.rank]=[])).push(node);
     for(const layer of layers)layer.sort((a,b)=>a.index-b.index);
+    // Document pages carry the section titles assigned by the generator.
+    const sections=new Map();
+    for(const node of nodes){
+      const anchor=node.element.parentElement;
+      const key=anchor.dataset.sectionId||anchor.getAttribute('href').split('#')[0];
+      if(!sections.has(key))sections.set(key,{title:anchor.dataset.section||key,members:[]});
+      sections.get(key).members.push(node);
+    }
+    let layoutMode='layered';
+    const svgNS='http://www.w3.org/2000/svg';
+    const panelLayer=document.createElementNS(svgNS,'g');
+    panelLayer.setAttribute('class','dependency-panel-layer');
+    dependencyGraph.insertBefore(panelLayer,dependencyGraph.querySelector('.dependency-edges'));
     const orderNodes=()=>layers.forEach(layer=>layer.forEach((node,index)=>node.order=index));
     orderNodes();
     // Sugiyama-style alternating barycenter sweeps reduce edge crossings.
@@ -146,23 +180,78 @@ document.addEventListener('DOMContentLoaded',()=>{
     }
     let direction='lr',layoutWidth=0,layoutHeight=0;
     const layout=()=>{
-      const layerGap=direction==='lr'?430:150,rowGap=direction==='lr'?116:360,margin=80;
-      const maxLayer=Math.max(0,layers.length-1),maxRows=Math.max(0,...layers.map(layer=>layer.length-1));
-      layoutWidth=margin*2+320+(direction==='lr'?maxLayer*layerGap:maxRows*rowGap);
-      layoutHeight=margin*2+80+(direction==='lr'?maxRows*rowGap:maxLayer*layerGap);
-      for(let r=0;r<layers.length;r++)layers[r].forEach((node,i)=>{
-        node.order=i;
-        if(direction==='lr'){node.x=margin+160+r*layerGap;node.y=margin+28+i*rowGap;}
-        else{node.x=margin+160+i*rowGap;node.y=margin+28+r*layerGap;}
-        node.element.setAttribute('transform',`translate(${node.x} ${node.y})`);
-      });
+      panelLayer.replaceChildren();
+      dependencyGraph.dataset.layout=layoutMode;
+      const margin=80;
+      if(layoutMode==='sections'){
+        const panels=[...sections.values()].map(section=>{
+          const members=[...section.members].sort((a,b)=>a.rank-b.rank||a.index-b.index);
+          const columns=Math.min(5,Math.max(1,Math.ceil(Math.sqrt(members.length*1.4))));
+          const cellWidth=Math.max(...members.map(node=>node.width))+48;
+          const rows=Math.ceil(members.length/columns);
+          return {...section,members,columns,cellWidth,width:columns*cellWidth+48,height:rows*100+88};
+        });
+        const targetWidth=Math.max(...panels.map((panel,i)=>i%2===0?panel.width+(panels[i+1]?.width||0)+64:0));
+        let x=margin,y=margin,rowHeight=0;
+        panels.forEach((panel,index)=>{
+          if(x>margin&&x+panel.width>margin+targetWidth){x=margin;y+=rowHeight+64;rowHeight=0;}
+          const group=document.createElementNS(svgNS,'g');
+          group.setAttribute('class','dependency-section-panel');
+          group.style.setProperty('--panel-hue',String(index*137.508%360));
+          const rect=document.createElementNS(svgNS,'rect');
+          for(const [key,value] of Object.entries({x,y,width:panel.width,height:panel.height,rx:16}))rect.setAttribute(key,value);
+          const heading=document.createElementNS(svgNS,'foreignObject');
+          for(const [key,value] of Object.entries({x:x+24,y:y+12,width:panel.width-48,height:40}))heading.setAttribute(key,value);
+          const label=document.createElement('div');label.className='dependency-section-title';
+          label.textContent=panel.title;heading.append(label);
+          if(window.renderMathInElement)renderMathInElement(label,{delimiters:[{left:'$',right:'$',display:false}],throwOnError:false});
+          const title=document.createElementNS(svgNS,'title');title.textContent=panel.title;
+          group.append(title,rect,heading);panelLayer.append(group);
+          panel.members.forEach((node,i)=>{
+            const col=direction==='lr'?i%panel.columns:Math.floor(i/Math.ceil(panel.members.length/panel.columns));
+            const row=direction==='lr'?Math.floor(i/panel.columns):i%Math.ceil(panel.members.length/panel.columns);
+            node.x=x+24+panel.cellWidth*(col+0.5);node.y=y+88+row*100;
+            node.order=i;
+          });
+          x+=panel.width+64;rowHeight=Math.max(rowHeight,panel.height);
+        });
+        layoutWidth=Math.max(...panels.map((p,i)=>Number(panelLayer.children[i].querySelector('rect').getAttribute('x'))+p.width))+margin;
+        layoutHeight=y+rowHeight+margin;
+      }else{
+        const layerGap=direction==='lr'?430:150,rowGap=direction==='lr'?116:360;
+        const maxLayer=Math.max(0,layers.length-1),maxRows=Math.max(0,...layers.map(layer=>layer.length-1));
+        layoutWidth=margin*2+320+(direction==='lr'?maxLayer*layerGap:maxRows*rowGap);
+        layoutHeight=margin*2+80+(direction==='lr'?maxRows*rowGap:maxLayer*layerGap);
+        for(let rank=0;rank<layers.length;rank++)layers[rank].forEach((node,i)=>{
+          node.order=i;
+          node.x=margin+160+(direction==='lr'?rank*layerGap:i*rowGap);
+          node.y=margin+28+(direction==='lr'?i*rowGap:rank*layerGap);
+        });
+      }
+      for(const node of nodes)node.element.setAttribute('transform',`translate(${node.x} ${node.y})`);
       updateEdges();
     };
     const updateEdges=()=>{
       for(const edge of edges){
         const from=nodes[edge.from],to=nodes[edge.to];
         let x1,y1,x2,y2,d;
-        if(from.rank===to.rank){
+        if(layoutMode==='sections'&&from!==to){
+          // Panel grids contain edges in every direction; enter the facing node border.
+          const dx=to.x-from.x,dy=to.y-from.y;
+          if(Math.abs(dx)>Math.abs(dy)*1.3){
+            const side=dx>=0?1:-1;
+            x1=from.x+side*from.width/2;y1=from.y;
+            x2=to.x-side*to.width/2;y2=to.y;
+            const mid=(x1+x2)/2;
+            d=`M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
+          }else{
+            const side=dy>=0?1:-1;
+            x1=from.x;y1=from.y+side*from.height/2;
+            x2=to.x;y2=to.y-side*to.height/2;
+            const mid=(y1+y2)/2;
+            d=`M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`;
+          }
+        }else if(from.rank===to.rank){
           const side=from.order<=to.order?1:-1;
           if(direction==='lr'){
             x1=from.x;y1=from.y+side*from.height/2;
@@ -187,14 +276,24 @@ document.addEventListener('DOMContentLoaded',()=>{
     };
     layout();
     let view={x:0,y:0,width:layoutWidth,height:layoutHeight},viewCustomized=false;
-    const setView=()=>dependencyGraph.setAttribute('viewBox',`${view.x} ${view.y} ${view.width} ${view.height}`);
+    const setView=()=>{
+      dependencyGraph.setAttribute('viewBox',`${view.x} ${view.y} ${view.width} ${view.height}`);
+      // Arrowheads use screen pixels, matching the non-scaling edge strokes.
+      const matrix=dependencyGraph.getScreenCTM();
+      const scale=matrix?Math.hypot(matrix.a,matrix.b):1;
+      if(scale>0)for(const [id,pixels] of [['dep-arrow',9],['dep-arrow-highlight',12]]){
+        const marker=dependencyGraph.querySelector('#'+id);
+        marker.setAttribute('markerWidth',pixels/scale);
+        marker.setAttribute('markerHeight',pixels/scale);
+      }
+    };
     const fitGraph=()=>{
       if(!dependencyGraph.clientWidth||!dependencyGraph.clientHeight)return;
       const padding=60;
-      const left=Math.min(...nodes.map(node=>node.x-node.width/2))-padding;
-      const right=Math.max(...nodes.map(node=>node.x+node.width/2))+padding;
-      const top=Math.min(...nodes.map(node=>node.y-node.height/2))-padding;
-      const bottom=Math.max(...nodes.map(node=>node.y+node.height/2))+padding;
+      const left=layoutMode==='sections'?20:Math.min(...nodes.map(node=>node.x-node.width/2))-padding;
+      const right=layoutMode==='sections'?layoutWidth-20:Math.max(...nodes.map(node=>node.x+node.width/2))+padding;
+      const top=layoutMode==='sections'?20:Math.min(...nodes.map(node=>node.y-node.height/2))-padding;
+      const bottom=layoutMode==='sections'?layoutHeight-20:Math.max(...nodes.map(node=>node.y+node.height/2))+padding;
       const centerX=(left+right)/2,centerY=(top+bottom)/2;
       let width=right-left,height=bottom-top;
       const aspect=dependencyGraph.clientWidth/dependencyGraph.clientHeight;
@@ -224,6 +323,10 @@ document.addEventListener('DOMContentLoaded',()=>{
         layout();fitGraph();
       }
     });
+    toolbar?.querySelector('[data-graph-action=layout]')?.addEventListener('change',event=>{
+      layoutMode=event.target.value==='sections'?'sections':'layered';
+      layout();fitGraph();
+    });
     dependencyGraph.addEventListener('wheel',event=>{
       event.preventDefault();
       const point=dependencyGraph.createSVGPoint();point.x=event.clientX;point.y=event.clientY;
@@ -247,13 +350,13 @@ document.addEventListener('DOMContentLoaded',()=>{
         clientX:event.clientX,clientY:event.clientY,nodeX:node?.x,nodeY:node?.y,
         viewX:view.x,viewY:view.y,moved:false};
       suppressPointerClick=false;
-      dependencyGraph.setPointerCapture(event.pointerId);
-      event.preventDefault();
+      // Capture only once a drag starts, so ordinary clicks retain their link target.
     });
     dependencyGraph.addEventListener('pointermove',event=>{
       if(!drag||event.pointerId!==drag.pointerId)return;
       if(Math.hypot(event.clientX-drag.clientX,event.clientY-drag.clientY)>4)drag.moved=true;
       if(!drag.moved)return;
+      if(!dependencyGraph.hasPointerCapture(event.pointerId))dependencyGraph.setPointerCapture(event.pointerId);
       viewCustomized=true;
       const point=graphPoint(event.clientX,event.clientY,drag.matrix);
       const dx=point.x-drag.start.x,dy=point.y-drag.start.y;
@@ -272,17 +375,31 @@ document.addEventListener('DOMContentLoaded',()=>{
       const {anchor,moved}=drag;
       if(anchor)delete anchor.dataset.dragging;
       delete dependencyGraph.dataset.panning;
-      suppressPointerClick=true;
+      suppressPointerClick=moved&&!cancelled;
       drag=null;
       if(dependencyGraph.hasPointerCapture(event.pointerId))dependencyGraph.releasePointerCapture(event.pointerId);
-      if(anchor&&!moved&&!cancelled)window.location.assign(anchor.getAttribute('href'));
+      if(anchor&&!moved&&!cancelled){selectedAnchor=anchor;showHover(anchor,event);}
     };
     dependencyGraph.addEventListener('pointerup',event=>endDrag(event,false));
     dependencyGraph.addEventListener('pointercancel',event=>endDrag(event,true));
     dependencyGraph.addEventListener('click',event=>{
-      if(event.detail>0&&suppressPointerClick){event.preventDefault();event.stopPropagation();suppressPointerClick=false;}
+      if(event.detail>0&&suppressPointerClick){event.preventDefault();event.stopPropagation();suppressPointerClick=false;return;}
+      if(event.detail===0)return; // Keep keyboard activation of declaration links.
+      const anchor=event.target.closest('.dependency-link');
+      if(anchor){
+        event.preventDefault();
+        selectedAnchor=anchor;
+        showHover(anchor,event);
+      }
     },true);
-    for(const node of nodes)node.element.parentElement.setAttribute('aria-label',`Open ${node.element.querySelector('.dependency-name').textContent}`);
+    dependencyGraph.addEventListener('dblclick',event=>{
+      const anchor=event.target.closest('.dependency-link');
+      if(anchor){event.preventDefault();window.location.assign(anchor.getAttribute('href'));}
+    },true);
+    document.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){selectedAnchor=null;clearHover();}
+    });
+    for(const node of nodes)node.element.parentElement.setAttribute('aria-label',`Select ${node.element.querySelector('.dependency-name').textContent}; right-click or press Escape to clear selection`);
   }
   if(document.body.dataset.live==='1'){
     let prior=null;
