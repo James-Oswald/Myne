@@ -120,6 +120,17 @@ static void header_html(Buf *b) {
 }
 
 
+static void dependency_graph_edge_html(Buf *html, int from, int to) {
+    char index[24];
+    add(html, "<path class=dependency-edge data-from=\"");
+    snprintf(index, sizeof(index), "%d", from);
+    add(html, index);
+    add(html, "\" data-to=\"");
+    snprintf(index, sizeof(index), "%d", to);
+    add(html, index);
+    add(html, "\" marker-end=\"url(#dep-arrow)\"></path>");
+}
+
 static void dependency_graph_html(const char *dir) {
     if (!ndependency_nodes) return;
     Buf html = {0};
@@ -157,10 +168,21 @@ static void dependency_graph_html(const char *dir) {
                    "<code>--elaborated-deps</code> for Lean's elaborated dependencies.</aside>");
     }
     add(&html, "<p class=graph-help>Arrows point from prerequisites toward the declarations "
-               "they build. Only declarations in this Myne document become nodes. Click once "
-               "to select a node and keep its dependencies highlighted. Right-click or press "
-               "Escape to clear selection; double-click to open its declaration. Drag nodes or "
-               "the background to rearrange and pan.</p><div "
+               "they build. ");
+    if (trace_library_dependencies) {
+        add(&html, elaborated_dependency_graph
+            ? "Imported and undocumented declarations are traced through their Lean dependencies. "
+            : "Unidentified names from the source are shown without Lean name resolution. ");
+        add(&html, "Click once to select a node and keep its dependencies highlighted. Right-click "
+                   "or press Escape to clear selection; double-click a documented declaration to "
+                   "open it. Drag nodes or the background to rearrange and pan.</p>");
+    } else {
+        add(&html, "Only declarations in this Myne document become nodes. Click once "
+                   "to select a node and keep its dependencies highlighted. Right-click or press "
+                   "Escape to clear selection; double-click to open its declaration. Drag nodes or "
+                   "the background to rearrange and pan.</p>");
+    }
+    add(&html, "<div "
                "class=dependency-toolbar role=toolbar aria-label=\"Graph controls\"><button "
                "type=button data-graph-action=zoom-out aria-label=\"Zoom out\">−</button><button "
                "type=button data-graph-action=zoom-in aria-label=\"Zoom in\">+</button><button "
@@ -171,24 +193,23 @@ static void dependency_graph_html(const char *dir) {
                "</label><button type=button "
                "data-graph-action=direction>Top to bottom</button><span class=graph-legend>"
                "<i class=legend-definition></i> Definitions <i class=legend-lemma></i> Lemmas "
-               "<i class=legend-theorem></i> Theorems</span></div><div "
+               "<i class=legend-theorem></i> Theorems");
+    if (trace_library_dependencies) add(&html, " <i class=legend-external></i> Undocumented");
+    add(&html, "</span></div><div "
                "class=dependency-scroll><svg class=dependency-graph role=img aria-label=\"Lean "
                "declaration dependency graph\" viewBox=\"0 0 1200 800\"><defs><marker id=\"dep-arrow\" "
                "markerUnits=\"userSpaceOnUse\" viewBox=\"0 0 8 8\" markerWidth=\"10\" markerHeight=\"10\" "
                "refX=\"8\" refY=\"4\" orient=\"auto\"><path "
                "d=\"M0,0 L8,4 L0,8 z\" class=dependency-arrow></path></marker></defs><g "
                "class=\"dependency-edges\">");
-    for (int i = 0; i < ndependency_nodes; i++) {
-        for (int j = 0; j < ndependency_nodes; j++) {
-            if (dependency_edge(i, j)) {
-                add(&html, "<path class=dependency-edge data-from=\"");
-                char index[24];
-                snprintf(index, sizeof(index), "%d", j);
-                add(&html, index);
-                add(&html, "\" data-to=\"");
-                snprintf(index, sizeof(index), "%d", i);
-                add(&html, index);
-                add(&html, "\" marker-end=\"url(#dep-arrow)\"></path>");
+    if (trace_library_dependencies) {
+        for (int i = 0; i < ndependency_edges; i++) {
+            dependency_graph_edge_html(&html, dependency_edges[i].from, dependency_edges[i].to);
+        }
+    } else {
+        for (int i = 0; i < ndependency_nodes; i++) {
+            for (int j = 0; j < ndependency_nodes; j++) {
+                if (dependency_edge(i, j)) dependency_graph_edge_html(&html, j, i);
             }
         }
     }
@@ -200,16 +221,26 @@ static void dependency_graph_html(const char *dir) {
         if (width > 320) width = 320;
         char id[24], dims[128];
         snprintf(id, sizeof(id), "decl-%d", i + 1);
-        add(&html, "<a class=dependency-link href=\"");
-        escape(&html, node->slug ? node->slug : "index.html");
-        ch(&html, '#');
-        add(&html, id);
-        add(&html, "\" aria-label=\"Open ");
+        add(&html, "<a class=dependency-link");
+        if (!node->external) {
+            add(&html, " href=\"");
+            escape(&html, node->slug ? node->slug : "index.html");
+            ch(&html, '#');
+            add(&html, id);
+            ch(&html, '"');
+        } else {
+            add(&html, " data-external=\"1\" tabindex=\"0\"");
+        }
+        add(&html, " aria-label=\"");
+        add(&html, node->external ? "Select " : "Open ");
         escape(&html, node->doc_name ? node->doc_name : node->name);
         add(&html, "\" data-section-id=\"");
-        escape(&html, node->slug ? node->slug : "index.html");
+        escape(&html, node->external ? "libraries" :
+                      node->slug ? node->slug : "index.html");
         add(&html, "\" data-section=\"");
-        escape(&html, node->page >= 0 && node->page < npages ? pages[node->page].title : "Declarations");
+        escape(&html, node->external ?
+                      (elaborated_dependency_graph ? "Library declarations" : "Unidentified references") :
+                      node->page >= 0 && node->page < npages ? pages[node->page].title : "Declarations");
         add(&html, "\" data-doc-name=\"");
         escape(&html, node->doc_name ? node->doc_name : node->name);
         add(&html, "\" data-doc-nl=\"");
@@ -217,7 +248,8 @@ static void dependency_graph_html(const char *dir) {
         add(&html, "\" data-doc-formula=\"");
         escape(&html, node->doc_formula ? node->doc_formula : "");
         add(&html, "\"><g class=\"dependency-node ");
-        add(&html, node->kind == LEAN_DEF ? "dependency-definition" :
+        add(&html, node->external ? "dependency-external" :
+                    node->kind == LEAN_DEF ? "dependency-definition" :
                     node->kind == LEAN_LEMMA ? "dependency-lemma" : "dependency-theorem");
         add(&html, "\" data-width=\"");
         snprintf(dims, sizeof(dims), "%d\" data-index=\"%d", width, i);
@@ -228,7 +260,8 @@ static void dependency_graph_html(const char *dir) {
         add(&html, "<text class=dependency-name x=\"0\" y=\"-2\">");
         escape(&html, node->name);
         add(&html, "</text><text class=dependency-kind x=\"0\" y=\"17\">");
-        add(&html, node->kind == LEAN_DEF ? "definition"
+        add(&html, node->external ? (elaborated_dependency_graph ? "library" : "unidentified") :
+                    node->kind == LEAN_DEF ? "definition"
                     : node->kind == LEAN_LEMMA ? "lemma" : "theorem");
         add(&html, "</text></g></a>");
     }

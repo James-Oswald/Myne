@@ -24,6 +24,10 @@ inputs:
     description: Use Lean to calculate precise declaration dependencies when building the site.
     required: false
     default: 'false'
+  trace-library-deps:
+    description: Include undocumented library declarations in the dependency graph.
+    required: false
+    default: 'false'
   upload-pages-artifact:
     description: Upload the generated HTML for a later actions/deploy-pages step.
     required: false
@@ -65,6 +69,7 @@ runs:
         BUILD_PDF: ${{ inputs.build-pdf }}
         TEX_MAIN_FILE: ${{ inputs.tex-main-file }}
         ELABORATED_DEPS: ${{ inputs.elaborated-deps }}
+        TRACE_LIBRARY_DEPS: ${{ inputs.trace-library-deps }}
       run: |
         set -euo pipefail
         project_dir="$PROJECT_DIRECTORY"
@@ -96,6 +101,9 @@ runs:
         extra_args=()
         if [[ "$ELABORATED_DEPS" == true ]]; then
           extra_args+=(--elaborated-deps)
+        fi
+        if [[ "$TRACE_LIBRARY_DEPS" == true ]]; then
+          extra_args+=(--trace-library-deps)
         fi
 
         "$RUNNER_TEMP/myne-source/bin/myne" \

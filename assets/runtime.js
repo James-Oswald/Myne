@@ -68,7 +68,7 @@ document.addEventListener('DOMContentLoaded',()=>{
           nodes[edge.from]?.element.parentElement.classList.add('is-dependency');
         }
       }
-      if(!tooltip)return;
+      if(!tooltip||anchor.dataset.external==='1')return;
       const addField=(label,value,math=false)=>{
         if(!value)return;
         const section=document.createElement('div');section.className='dependency-tooltip-field';
@@ -394,7 +394,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     },true);
     dependencyGraph.addEventListener('dblclick',event=>{
       const anchor=event.target.closest('.dependency-link');
-      if(anchor){event.preventDefault();window.location.assign(anchor.getAttribute('href'));}
+      if(anchor?.hasAttribute('href')){event.preventDefault();window.location.assign(anchor.getAttribute('href'));}
     },true);
     document.addEventListener('keydown',event=>{
       if(event.key==='Escape'){selectedAnchor=null;clearHover();}

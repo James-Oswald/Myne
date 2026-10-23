@@ -156,7 +156,7 @@ static int build(void) {
 static void usage(void) {
     puts("Usage: myne [-i root|project-dir] [-f html|tex|both] [-o outputDir] [-s style] [--config "
          "file] "
-         "[--elaborated-deps] [--watch] [--serve] [--port N]");
+         "[--elaborated-deps] [--trace-library-deps] [--watch] [--serve] [--port N]");
 }
 
 int main(int argc, char **argv) {
@@ -249,6 +249,8 @@ int main(int argc, char **argv) {
             watch = 1;
         } else if (!strcmp(a, "--elaborated-deps")) {
             elaborated_dependency_graph = 1;
+        } else if (!strcmp(a, "--trace-library-deps")) {
+            trace_library_dependencies = 1;
         } else if (!strcmp(a, "--serve")) {
             serve = watch = live = 1;
         } else if (!strcmp(a, "-h") || !strcmp(a, "--help")) {

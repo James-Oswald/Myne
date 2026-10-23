@@ -487,6 +487,12 @@ void clear_project(void) {
         free(dependency_nodes[i].resolved_name);
         memset(&dependency_nodes[i], 0, sizeof(DependencyNode));
     }
+    free(dependency_nodes);
+    dependency_nodes = NULL;
+    dependency_node_cap = 0;
+    free(dependency_edges);
+    dependency_edges = NULL;
+    ndependency_edges = dependency_edge_cap = 0;
     for (int i = 0; i < nlean_dependency_decls; i++) {
         free(lean_dependency_decls[i].name);
         for (int j = 0; j < lean_dependency_decls[i].ndeps; j++) {
@@ -627,6 +633,10 @@ void load_config(const char *path) {
             else if (!strcmp(mode, "elaborated")) elaborated_dependency_graph = 1;
             else die("dependencyGraph must be basic or elaborated");
             free(mode);
+        } else if (!strcmp(key, "traceLibraryDependencies")) {
+            if (!config_bool(value, &trace_library_dependencies)) {
+                die("traceLibraryDependencies must be true or false");
+            }
         } else if (!strcmp(key, "texTemplate")) {
             tex_template = unquote(value);
         } else if (!strcmp(key, "texClass")) {

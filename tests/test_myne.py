@@ -4,6 +4,7 @@ from __future__ import annotations
 import http.client
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import subprocess
@@ -20,6 +21,49 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 class MyneTests(unittest.TestCase):
+    def test_library_dependency_trace_in_basic_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\nformat = "html"\n')
+            (base / "main.lean").write_text(
+                '/-! # Library dependencies -/\n'
+                '/-- @name Use commutativity -/\n'
+                'theorem use_comm (a b : Nat) : a + b = b + a := Nat.add_comm a b\n'
+            )
+            result = run("--trace-library-deps", cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            graph = (base / "out/html/dependencies.html").read_text()
+            self.assertIn('data-external="1"', graph)
+            self.assertIn('>Nat.add_comm</text>', graph)
+            self.assertIn('>unidentified</text>', graph)
+
+    @unittest.skipUnless(shutil.which("lean"), "Lean 4 is required")
+    def test_library_dependency_trace_in_elaborated_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text(
+                'root = "main.lean"\nformat = "html"\n'
+                '[web]\ntraceLibraryDependencies = true\n'
+            )
+            (base / "main.lean").write_text(
+                '/-! # Library dependencies -/\n'
+                '/-- @name Use commutativity -/\n'
+                'theorem use_comm (a b : Nat) : a + b = b + a := Nat.add_comm a b\n'
+            )
+            result = run("--elaborated-deps", cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            graph = (base / "out/html/dependencies.html").read_text()
+            names = re.findall(r'<text class=dependency-name[^>]*>([^<]+)</text>', graph)
+            edges = {(int(a), int(b)) for a, b in re.findall(
+                r'data-from="(\d+)" data-to="(\d+)"', graph
+            )}
+            self.assertIn('Nat.add_comm', names)
+            library = names.index('Nat.add_comm')
+            self.assertIn((library, names.index('use_comm')), edges)
+            self.assertTrue(any(to == library for _, to in edges),
+                            'the library theorem should have its own prerequisites')
+            self.assertIn('data-external="1"', graph)
+
     @unittest.skipUnless(shutil.which("lean"), "Lean 4 is required")
     def test_elaborated_graph_resolves_notation_and_tactics_only_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

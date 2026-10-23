@@ -1,5 +1,58 @@
 #include "myne_internal.h"
 
+static DependencyNode *dependency_add_node(const char *name, int external) {
+    if (ndependency_nodes == dependency_node_cap) {
+        dependency_node_cap = dependency_node_cap ? dependency_node_cap * 2 : 128;
+        dependency_nodes = realloc(dependency_nodes,
+                                   (size_t)dependency_node_cap * sizeof(*dependency_nodes));
+        if (!dependency_nodes) exit(2);
+    }
+    DependencyNode *node = &dependency_nodes[ndependency_nodes];
+    memset(node, 0, sizeof(*node));
+    node->name = xstrdup(name);
+    node->graph_id = ndependency_nodes++;
+    node->external = external;
+    node->file = node->page = node->segment = -1;
+    node->kind = LEAN_DEF;
+    return node;
+}
+
+static void dependency_add_edge(int from, int to) {
+    if (from == to) return;
+    if (!elaborated_dependency_graph) {
+        for (int i = 0; i < ndependency_edges; i++) {
+            if (dependency_edges[i].from == from && dependency_edges[i].to == to) return;
+        }
+    }
+    if (ndependency_edges == dependency_edge_cap) {
+        dependency_edge_cap = dependency_edge_cap ? dependency_edge_cap * 2 : 128;
+        dependency_edges = realloc(dependency_edges,
+                                   (size_t)dependency_edge_cap * sizeof(*dependency_edges));
+        if (!dependency_edges) exit(2);
+    }
+    dependency_edges[ndependency_edges++] = (DependencyEdge){from, to};
+}
+
+static int dependency_graph_index(const char *name) {
+    for (int i = 0; i < ndependency_nodes; i++) {
+        const char *known = dependency_nodes[i].resolved_name ?
+                            dependency_nodes[i].resolved_name : dependency_nodes[i].name;
+        if (!strcmp(known, name)) return i;
+    }
+    return -1;
+}
+
+static void dependency_trace_syntax(void);
+
+static void dependency_add_lean_string(Buf *out, const char *value) {
+    ch(out, '"');
+    for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
+        if (*p == '"' || *p == '\\') ch(out, '\\');
+        ch(out, (char)*p);
+    }
+    ch(out, '"');
+}
+
 int keyword(const char *s, size_t n) {
     const char *kw[] = {"def",  "theorem", "lemma",     "by",        "import",  "namespace",
                         "end",  "where",   "inductive", "structure", "example", "variable",
@@ -101,14 +154,10 @@ static void dependency_collect_code(const char *source, int segment) {
             if (current_node >= 0) {
                 dependency_nodes[current_node].source = slice(source + current_start, line - current_start);
             }
-            if (ndependency_nodes >= MAX_SEGS) {
-                die("too many declarations for the dependency graph");
-                return;
-            }
-            current_node = ndependency_nodes++;
-            DependencyNode *node = &dependency_nodes[current_node];
-            memset(node, 0, sizeof(*node));
-            node->name = slice(source + name, name_len);
+            char *declaration_name = slice(source + name, name_len);
+            DependencyNode *node = dependency_add_node(declaration_name, 0);
+            free(declaration_name);
+            current_node = node->graph_id;
             node->file = segs[segment].file;
             node->graph_id = current_node;
             node->doc_name = segs[segment].doc_name ? xstrdup(segs[segment].doc_name) : NULL;
@@ -133,6 +182,8 @@ void dependency_collect(void) {
             dependency_collect_code(segs[i].s, i);
         }
     }
+    if (trace_library_dependencies && !elaborated_dependency_graph)
+        dependency_trace_syntax();
 }
 
 static int dependency_uses(const char *source, const char *name);
@@ -268,13 +319,45 @@ static void dependency_elaborate_file(int file) {
     add(&source, files[file].data + import_at);
     add(&source, "\n\nopen Lean Elab Command\n"
                  "elab \"#myne_dependencies\" : command => do\n"
-                 "  let env ← getEnv\n"
-                 "  for (name, ci) in env.constants do\n"
-                 "    if !env.isImportedConst name then\n"
-                 "      IO.println s!\"MYNE_DECL\\t{name}\"\n"
-                 "      for dep in ci.getUsedConstantsAsSet do\n"
-                 "        IO.println s!\"MYNE_EDGE\\t{name}\\t{dep}\"\n"
-                 "#myne_dependencies\n");
+                 "  let env ← getEnv\n");
+    if (trace_library_dependencies) {
+        add(&source,
+            "  let roots : Array String := #[");
+        int first = 1;
+        for (int i = 0; i < ndependency_nodes; i++) {
+            if (dependency_nodes[i].file != file || dependency_nodes[i].external) continue;
+            if (!first) add(&source, ", ");
+            dependency_add_lean_string(&source, dependency_nodes[i].name);
+            first = 0;
+        }
+        add(&source,
+            "]\n"
+            "  let mut todo : Array Name := #[]\n"
+            "  for (name, _) in env.constants do\n"
+            "    if !env.isImportedConst name then\n"
+            "      let full := name.toString\n"
+            "      if roots.any (fun root => full == root || full.endsWith (\".\" ++ root)) then\n"
+            "        todo := todo.push name\n"
+            "  let mut seen : Std.HashSet Name := {}\n"
+            "  while !todo.isEmpty do\n"
+            "    let name := todo.back!\n"
+            "    todo := todo.pop\n"
+            "    if seen.contains name then continue\n"
+            "    seen := seen.insert name\n"
+            "    let some ci := env.find? name | continue\n"
+            "    IO.println s!\"MYNE_DECL\\t{name}\"\n"
+            "    for dep in ci.getUsedConstantsAsSet do\n"
+            "      IO.println s!\"MYNE_EDGE\\t{name}\\t{dep}\"\n"
+            "      if !seen.contains dep then todo := todo.push dep\n");
+    } else {
+        add(&source,
+            "  for (name, ci) in env.constants do\n"
+            "    if !env.isImportedConst name then\n"
+            "      IO.println s!\"MYNE_DECL\\t{name}\"\n"
+            "      for dep in ci.getUsedConstantsAsSet do\n"
+            "        IO.println s!\"MYNE_EDGE\\t{name}\\t{dep}\"\n");
+    }
+    add(&source, "#myne_dependencies\n");
     if (write_all(source_path, source.s, source.n)) {
         die("cannot write temporary Lean source for %s", files[file].rel);
         goto cleanup;
@@ -418,6 +501,26 @@ static void dependency_trace_elaborated(int root, int declaration, unsigned char
     }
 }
 
+static void dependency_trace_libraries(void) {
+    /* Newly discovered nodes are processed by the same loop until every reachable
+       declaration has been visited. Missing environment entries remain named leaves. */
+    for (int i = 0; i < ndependency_nodes; i++) {
+        DependencyNode *node = &dependency_nodes[i];
+        const char *name = node->resolved_name ? node->resolved_name : node->name;
+        int declaration = dependency_decl_index(name, node->file);
+        if (declaration < 0) continue;
+        LeanDependencyDecl *decl = &lean_dependency_decls[declaration];
+        for (int j = 0; j < decl->ndeps; j++) {
+            const char *used = decl->deps[j];
+            int prerequisite = dependency_graph_index(used);
+            if (prerequisite < 0) {
+                prerequisite = dependency_add_node(used, 1)->graph_id;
+            }
+            dependency_add_edge(prerequisite, i);
+        }
+    }
+}
+
 void dependency_elaborate(void) {
     for (int file = 0; file < nfiles && !failed; file++) {
         if (!files[file].lean) continue;
@@ -444,6 +547,10 @@ void dependency_elaborate(void) {
         }
         node->resolved_name = xstrdup(lean_dependency_decls[match].name);
     }
+    if (trace_library_dependencies) {
+        dependency_trace_libraries();
+        return;
+    }
     elaborated_edge_width = ndependency_nodes;
     elaborated_edges = calloc((size_t)ndependency_nodes * ndependency_nodes, 1);
     if (!elaborated_edges) exit(2);
@@ -459,6 +566,12 @@ void dependency_elaborate(void) {
 
 int dependency_edge(int from, int to) {
     if (from == to) return 0;
+    if (trace_library_dependencies) {
+        for (int i = 0; i < ndependency_edges; i++) {
+            if (dependency_edges[i].from == to && dependency_edges[i].to == from) return 1;
+        }
+        return 0;
+    }
     if (elaborated_dependency_graph)
         return elaborated_edges[(size_t)dependency_nodes[from].graph_id * elaborated_edge_width +
                                 dependency_nodes[to].graph_id];
@@ -466,6 +579,7 @@ int dependency_edge(int from, int to) {
 }
 
 void dependency_prune(void) {
+    if (trace_library_dependencies) return;
     for (;;) {
         int dependents[MAX_SEGS] = {0};
         for (int i = 0; i < ndependency_nodes; i++) {
@@ -516,5 +630,75 @@ static int dependency_uses(const char *source, const char *name) {
         if (left && right) return 1;
     }
     return 0;
+}
+
+static int dependency_syntax_keyword(const char *name) {
+    const char *extra[] = {"abbrev", "opaque", "class", "instance", "axiom", "Prop", "Type",
+                           "Sort", "exact", "apply", "simp_all", "rw", "rfl", "intro",
+                           "intros", "constructor", "trivial", "decide", "assumption",
+                           "cases", "case", "induction", "calc", "show", "from", "at",
+                           "unfold", "change", "refine", "repeat", "first", "all_goals",
+                           "any_goals", "done", "sorry", "admit", "return", "do", "in",
+                           "variable", "variables", "section", "end", "set_option"};
+    if (keyword(name, strlen(name))) return 1;
+    for (size_t i = 0; i < sizeof(extra) / sizeof(*extra); i++) {
+        if (!strcmp(name, extra[i])) return 1;
+    }
+    return 0;
+}
+
+static void dependency_trace_syntax(void) {
+    int documented = ndependency_nodes;
+    for (int i = 0; i < documented; i++) {
+        const char *source = dependency_nodes[i].source;
+        if (!source) continue;
+        for (int j = 0; j < documented; j++) {
+            if (i != j && dependency_uses(source, dependency_nodes[j].name))
+                dependency_add_edge(j, i);
+        }
+        const char *body = strstr(source, ":=");
+        size_t n = strlen(source), comment_depth = 0;
+        int string = 0;
+        for (size_t p = 0; p < n;) {
+            if (comment_depth) {
+                if (p + 1 < n && source[p] == '/' && source[p + 1] == '-') {
+                    comment_depth++; p += 2;
+                } else if (p + 1 < n && source[p] == '-' && source[p + 1] == '/') {
+                    comment_depth--; p += 2;
+                } else p++;
+                continue;
+            }
+            if (string) {
+                if (source[p] == '\\' && p + 1 < n) p += 2;
+                else if (source[p++] == '"') string = 0;
+                continue;
+            }
+            if (p + 1 < n && source[p] == '-' && source[p + 1] == '-') {
+                while (p < n && source[p] != '\n') p++;
+                continue;
+            }
+            if (p + 1 < n && source[p] == '/' && source[p + 1] == '-') {
+                comment_depth = 1; p += 2; continue;
+            }
+            if (source[p] == '"') { string = 1; p++; continue; }
+            if (!(isalpha((unsigned char)source[p]) || (unsigned char)source[p] >= 0x80)) {
+                p++; continue;
+            }
+            size_t start = p++;
+            while (p < n && dependency_name_char((unsigned char)source[p])) p++;
+            char *name = slice(source + start, p - start);
+            int candidate = strlen(name) > 1 && !dependency_syntax_keyword(name) &&
+                            (strchr(name, '.') || isupper((unsigned char)name[0]) ||
+                             (body && source + start > body + 1));
+            if (candidate && dependency_graph_index(name) < 0) {
+                int external = dependency_add_node(name, 1)->graph_id;
+                dependency_add_edge(external, i);
+            } else if (candidate) {
+                int known = dependency_graph_index(name);
+                if (known >= documented) dependency_add_edge(known, i);
+            }
+            free(name);
+        }
+    }
 }
 

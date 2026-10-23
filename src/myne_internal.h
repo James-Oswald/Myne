@@ -97,7 +97,7 @@ typedef struct {
 
 typedef struct {
     char *name, *source, *slug, *doc_name, *doc_nl, *doc_formula, *resolved_name;
-    int kind, segment, page, file, graph_id;
+    int kind, segment, page, file, graph_id, external;
     size_t offset;
 } DependencyNode;
 
@@ -105,6 +105,10 @@ typedef struct {
     char *name, **deps;
     int file, ndeps, cap;
 } LeanDependencyDecl;
+
+typedef struct {
+    int from, to;
+} DependencyEdge;
 
 typedef struct {
     char *key, *author, *title, *year;
@@ -127,12 +131,14 @@ extern Segment segs[MAX_SEGS], appendix_segs[MAX_SEGS];
 extern int nsegs, nappendix_segs, appendix_capture;
 extern Page pages[MAX_PAGES];
 extern int npages, current, part, bib_page;
-extern DependencyNode dependency_nodes[MAX_SEGS];
-extern int ndependency_nodes;
+extern DependencyNode *dependency_nodes;
+extern int ndependency_nodes, dependency_node_cap;
+extern DependencyEdge *dependency_edges;
+extern int ndependency_edges, dependency_edge_cap;
 extern LeanDependencyDecl *lean_dependency_decls;
 extern int nlean_dependency_decls, lean_dependency_cap;
 extern unsigned char *elaborated_edges;
-extern int elaborated_edge_width, elaborated_dependency_graph;
+extern int elaborated_edge_width, elaborated_dependency_graph, trace_library_dependencies;
 extern Bib bibs[MAX_BIB];
 extern int nbibs, ncites;
 extern Mapping maps[64];
