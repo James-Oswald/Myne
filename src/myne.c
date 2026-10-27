@@ -160,9 +160,15 @@ static void usage(void) {
 }
 
 int main(int argc, char **argv) {
-    int watch = 0, serve = 0, explicit_config = 0;
-    char *input_arg = NULL;
-    int input_is_dir = 0;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+            usage();
+            return 0;
+        }
+    }
+    int watch = 0, serve = 0, explicit_config = 0, explicit_format = 0;
+    char *input_arg = ".";
+    int input_is_dir = 1;
     format = xstrdup("html");
     style = xstrdup("plain");
     page_heading = xstrdup("section");
@@ -235,6 +241,7 @@ int main(int argc, char **argv) {
                 }
             } else if (!strcmp(a, "-f")) {
                 format = v;
+                explicit_format = 1;
             } else if (!strcmp(a, "-o")) {
                 snprintf(output, sizeof(output), "%s", v);
 #ifdef _WIN32
@@ -259,6 +266,9 @@ int main(int argc, char **argv) {
             die("unknown or incomplete option %s", a);
             return 1;
         }
+    }
+    if (serve && !explicit_format) {
+        format = "html";
     }
     if (!root || (strcmp(format, "html") && strcmp(format, "tex") && strcmp(format, "both"))) {
         usage();
@@ -288,8 +298,14 @@ int main(int argc, char **argv) {
         snprintf(output, sizeof(output), "%s", absolute);
         free(absolute);
     }
-    if (build() && !watch) {
-        return 1;
+    if (build()) {
+        if (!watch) {
+            fprintf(stderr, "myne: build failed; output was not refreshed. Fix the errors above and rerun.\n");
+            return 1;
+        }
+        fprintf(stderr,
+                "myne: initial build failed; the last successful output remains in place, if available. "
+                "Fix the errors above; the watcher will retry after a project file changes.\n");
     }
     if (serve && start_server()) {
         return 1;
@@ -304,7 +320,11 @@ int main(int argc, char **argv) {
         unsigned long long next = fingerprint_dir("", 0);
         if (next != previous) {
             previous = next;
-            build();
+            if (build()) {
+                fprintf(stderr,
+                        "myne: rebuild failed; output was not refreshed. Fix the errors above; "
+                        "Myne will retry after another project file change.\n");
+            }
         }
     }
 }
