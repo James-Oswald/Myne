@@ -840,6 +840,60 @@ static void code_html(const char *s, int segment) {
     add(b, "</code></pre>");
 }
 
+static int references_page(void) {
+    int existing = bib_page >= 0 ? bib_page : npages - 1;
+    if (npages == 1) {
+        return existing;
+    }
+    int top_heading = page_heading_level;
+    for (int i = 1; i < npages; i++) {
+        if (!pages[i].appendix && !pages[i].appendix_group &&
+            pages[i].heading < top_heading) {
+            top_heading = pages[i].heading;
+        }
+    }
+    if (existing > 0 && pages[existing].heading == top_heading &&
+        (!strcasecmp(pages[existing].title, "References") ||
+         !strcasecmp(pages[existing].title, "Bibliography"))) {
+        pages[existing].references = 1;
+        return existing;
+    }
+    if (npages >= MAX_PAGES) {
+        die("too many pages");
+        return -1;
+    }
+    int index = npages;
+    for (int i = 1; i < npages; i++) {
+        if (pages[i].appendix_group) {
+            index = i;
+            break;
+        }
+    }
+    if (index < npages) {
+        memmove(pages + index + 1, pages + index, (npages - index) * sizeof(Page));
+    }
+    memset(&pages[index], 0, sizeof(Page));
+    npages++;
+    Page *reference = &pages[index];
+    reference->title = xstrdup("References");
+    reference->slug = xstrdup("references.html");
+    reference->heading = top_heading;
+    reference->part = pages[index - 1].part + 1;
+    reference->references = 1;
+    for (int i = 0; i < ndependency_nodes; i++) {
+        if (dependency_nodes[i].page >= index) {
+            dependency_nodes[i].page++;
+        }
+    }
+    if (current >= index) {
+        current++;
+    }
+    if (bib_page >= index) {
+        bib_page++;
+    }
+    return index;
+}
+
 static void append_references(void) {
     if (ncites == 0 && bib_page >= 0) {
         for (int i = 0; i < nbibs; i++) {
@@ -849,7 +903,10 @@ static void append_references(void) {
     if (ncites == 0) {
         return;
     }
-    int page = bib_page >= 0 ? bib_page : npages - 1;
+    int page = references_page();
+    if (page < 0) {
+        return;
+    }
     for (int i = 0; i < npages; i++) {
         if (i == page || !pages[i].body.s) {
             continue;
@@ -868,7 +925,8 @@ static void append_references(void) {
         pages[i].body = linked;
     }
     Buf *b = &pages[page].body;
-    add(b, "<section class=references><h2>References</h2><ol>");
+    add(b, npages == 1 ? "<section class=references><h2>References</h2><ol>"
+                       : "<section class=\"references standalone\"><ol>");
     for (int num = 1; num <= ncites; num++) {
         for (int i = 0; i < nbibs; i++) {
             if (bibs[i].number == num) {
@@ -1012,5 +1070,5 @@ int render_html_document(void) {
         current = previous_page;
     }
     append_references();
-    return 0;
+    return failed ? -1 : 0;
 }

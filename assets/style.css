@@ -48,7 +48,8 @@ a { color: #295c9a; }
 .toc-nav a { display: block; padding: 0.25rem 0; text-decoration: none; }
 .toc-nav .nav-title { margin-bottom: 0.8rem; font-weight: 700; }
 .toc-nav .nav-entry { border-left: 1px solid transparent; padding-left: 0.45rem; }
-.toc-nav .appendix-group {
+.toc-nav .appendix-group,
+.toc-nav .references-group {
     margin-top: 0.8rem;
     padding-left: 0;
     font: inherit;
@@ -180,6 +181,7 @@ pre {
 .reference-number { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mobile-notes li.reference-note { list-style: none; }
 .references { margin-top: 3rem; border-top: 1px solid #ccd4dc; }
+.references.standalone { margin-top: 1rem; border-top: 0; }
 .references li { margin: 0.7rem 0; }
 .part-list { padding-left: 1.2rem; }
 .page-toc {

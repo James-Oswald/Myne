@@ -92,7 +92,7 @@ typedef struct {
     Buf body, byline, notes, toc;
     int toc_count;
     int part, heading;
-    int appendix_group, appendix;
+    int appendix_group, appendix, references;
 } Page;
 
 typedef struct {

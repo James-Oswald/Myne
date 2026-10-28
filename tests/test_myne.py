@@ -20,6 +20,36 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 class MyneTests(unittest.TestCase):
+    def test_references_page_precedes_appendices(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text(
+                'root = "main.lean"\nformat = "html"\nbibliography = ["refs.bib"]\n'
+                '[web]\npageHeading = "subsection"\n'
+            )
+            (base / "refs.bib").write_text(
+                '@article{sample, author={A. Author}, title={A paper}, year={2026}}\n'
+            )
+            (base / "main.lean").write_text(
+                '/-! \\title{A document}\\section{Main}See \\cite{sample}. -/\n'
+                '--myne:appendix_start Supplement\n'
+                '/-! Appendix material. -/\n'
+                '--myne:appendix_end\n'
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            html_dir = base / "out/html"
+            title = (html_dir / "index.html").read_text()
+            main = (html_dir / "section-001.html").read_text()
+            refs = (html_dir / "references.html").read_text()
+            self.assertLess(title.index('href="references.html"'),
+                            title.index('>Appendices</a>'))
+            self.assertIn('nav-depth-1 heading-section references-group', title)
+            self.assertIn('nav-depth-1 heading-subsection appendix-group', title)
+            self.assertIn('href="references.html#ref-sample"', main)
+            self.assertIn('<h1>References</h1>', refs)
+            self.assertIn('Appendix material.', (html_dir / "subsection-003.html").read_text())
+
     def test_tex_output_rewrites_local_bibliography_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -113,14 +143,20 @@ class MyneTests(unittest.TestCase):
             )
             result = run(cwd=base)
             self.assertEqual(result.returncode, 0, result.stderr)
-            intro = (base / "out/html/section-001.html").read_text()
-            refs = (base / "out/html/section-002.html").read_text()
-            runtime = (base / "out/html/runtime.js").read_text()
+            html_dir = base / "out/html"
+            intro = (html_dir / "section-001.html").read_text()
+            sources = (html_dir / "section-002.html").read_text()
+            refs = (html_dir / "references.html").read_text()
+            title = (html_dir / "index.html").read_text()
+            runtime = (html_dir / "runtime.js").read_text()
 
             self.assertIn(
-                '<span class=citation>[<a href="section-002.html#ref-alpha">1</a>,'
-                '<a href="section-002.html#ref-beta">2</a>]</span>', intro,
+                '<span class=citation>[<a href="references.html#ref-alpha">1</a>,'
+                '<a href="references.html#ref-beta">2</a>]</span>', intro,
             )
+            self.assertIn('<h1>References</h1><section class="references standalone">', refs)
+            self.assertNotIn('class=references', sources)
+            self.assertIn('href="references.html">References</a>', title)
             self.assertIn('<span class=reference-number>[1]</span>', intro)
             self.assertIn('<span class=reference-number>[2]</span>', intro)
             self.assertIn('<li class=reference-note>', intro)
@@ -136,6 +172,16 @@ class MyneTests(unittest.TestCase):
             self.assertNotIn(r"{\~{n}}", refs)
             self.assertIn("renderMathInElement(document.body", runtime)
             self.assertIn(r"left:'\\('", runtime)
+
+            (base / "main.tex").write_text(
+                r"\title{References}See \cite{alpha}.\bibliography{refs}" "\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            single_page = (html_dir / "index.html").read_text()
+            self.assertIn('<section class=references><h2>References</h2><ol>', single_page)
+            self.assertIn('href="#ref-alpha"', single_page)
+            self.assertFalse((html_dir / "references.html").exists())
 
     @unittest.skipUnless(shutil.which("latexmk"), "latexmk is required")
     def test_watch_both_compiles_pdf_and_reports_latex_errors(self) -> None:

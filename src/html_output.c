@@ -22,18 +22,21 @@ static void nav_html(Buf *b, int active) {
         if (i == active) {
             add(b, "active ");
         }
-        int depth = pages[i].heading - root_heading;
+        int category = pages[i].references || pages[i].appendix_group;
+        int depth = (pages[i].references ? page_heading_level : pages[i].heading) -
+                    root_heading;
         if (depth < 0) {
             depth = 0;
         } else if (depth > 4) {
             depth = 4;
         }
-        char nav_class[80];
-        snprintf(nav_class, sizeof(nav_class), "nav-entry nav-depth-%d heading-%s%s ", depth,
+        char nav_class[100];
+        snprintf(nav_class, sizeof(nav_class), "nav-entry nav-depth-%d heading-%s%s%s ", depth,
                  heading_name(pages[i].heading),
-                 pages[i].appendix_group ? " appendix-group" : "");
+                 pages[i].appendix_group ? " appendix-group" : "",
+                 pages[i].references ? " references-group" : "");
         add(b, nav_class);
-        if (pages[i].heading == 2) {
+        if (pages[i].heading == 2 && !category) {
             add(b, "part");
         }
         add(b, "\" href=\"");
