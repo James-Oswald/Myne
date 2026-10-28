@@ -110,7 +110,7 @@ void unpack_katex(const char *dir) {
 }
 
 int asset(const char *s) {
-    const char *ext[] = {".bib",  ".cls", ".sty", ".png", ".jpg",
+    const char *ext[] = {".bib",  ".bst", ".cls", ".sty", ".png", ".jpg",
                          ".jpeg", ".gif", ".svg", ".pdf", ".eps"};
     for (size_t i = 0; i < sizeof(ext) / sizeof(*ext); i++) {
         if (ends(s, ext[i])) {

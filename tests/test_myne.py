@@ -20,6 +20,54 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 class MyneTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("latexmk"), "latexmk is required")
+    def test_watch_both_compiles_pdf_and_reports_latex_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "src").mkdir()
+            (base / "myne.toml").write_text('root = "src/main.tex"\nformat = "both"\n')
+            (base / "src/custom.bst").write_text("% local BibTeX style asset\n")
+            source = base / "src/main.tex"
+
+            def tex(body: str) -> str:
+                return ("\\documentclass{article}\n\\title{PDF preview}\n"
+                        "\\begin{document}\n\\maketitle\n" + body + "\n\\end{document}\n")
+
+            source.write_text(tex("First version."))
+            log = base / "watch.log"
+            with log.open("w") as stderr:
+                proc = subprocess.Popen([str(MYNE), "--watch"], cwd=base,
+                                        stdout=subprocess.DEVNULL, stderr=stderr)
+                try:
+                    pdf = base / "out/tex/src/main.pdf"
+                    deadline = time.monotonic() + 20
+                    while not pdf.is_file():
+                        self.assertIsNone(proc.poll(), "watch exited before generating PDF")
+                        self.assertLess(time.monotonic(), deadline, log.read_text())
+                        time.sleep(0.1)
+                    self.assertTrue(pdf.read_bytes().startswith(b"%PDF"))
+                    self.assertTrue((base / "out/tex/src/custom.bst").is_file())
+                    self.assertIn('href="../tex/src/main.pdf"',
+                                  (base / "out/html/index.html").read_text())
+                    first_pdf = pdf.read_bytes()
+
+                    source.write_text(tex(r"\undefinedcommand"))
+                    deadline = time.monotonic() + 20
+                    while "PDF compilation failed" not in log.read_text():
+                        self.assertLess(time.monotonic(), deadline, log.read_text())
+                        time.sleep(0.1)
+                    self.assertEqual(pdf.read_bytes(), first_pdf)
+
+                    source.write_text(tex("Second version."))
+                    deadline = time.monotonic() + 20
+                    while pdf.read_bytes() == first_pdf:
+                        self.assertLess(time.monotonic(), deadline, log.read_text())
+                        time.sleep(0.1)
+                    self.assertIn("Second version.", (base / "out/tex/src/main.tex").read_text())
+                finally:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+
     @unittest.skipUnless(shutil.which("lean"), "Lean 4 is required")
     def test_elaborated_graph_resolves_notation_and_tactics_only_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

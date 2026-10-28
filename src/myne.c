@@ -2,8 +2,81 @@
 
 static char config_path[PATH_MAX];
 
+/* Compile a watched TeX tree before publishing it to the local server. */
+static void build_pdf(const char *tex) {
+    char *pdf = document_pdf_name();
+    char *source = xstrdup(pdf);
+    strcpy(source + strlen(source) - 4, ".tex");
+    int exit_code = 1;
+#ifdef _WIN32
+    STARTUPINFOA startup = {0};
+    PROCESS_INFORMATION process = {0};
+    startup.cb = sizeof(startup);
+    size_t command_cap = strlen(source) + 100;
+    char *command = xmalloc(command_cap);
+    snprintf(command, command_cap,
+             "latexmk -pdf -interaction=nonstopmode -halt-on-error -quiet \"%s\"", source);
+    if (!CreateProcessA(NULL, command, NULL, NULL, FALSE, 0, NULL, tex, &startup, &process)) {
+        die("cannot start latexmk for %s (Windows error %lu)", source,
+            (unsigned long)GetLastError());
+    } else {
+        WaitForSingleObject(process.hProcess, INFINITE);
+        DWORD code = 1;
+        GetExitCodeProcess(process.hProcess, &code);
+        exit_code = (int)code;
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+    }
+    free(command);
+#else
+    pid_t child = fork();
+    if (child == 0) {
+        if (chdir(tex)) {
+            perror("myne: cannot enter TeX output directory");
+            _exit(127);
+        }
+        execlp("latexmk", "latexmk", "-pdf", "-interaction=nonstopmode",
+               "-halt-on-error", "-quiet", source, (char *)NULL);
+        perror("myne: cannot run latexmk");
+        _exit(127);
+    }
+    if (child < 0) {
+        die("cannot start latexmk for %s: %s", source, strerror(errno));
+    } else {
+        int status = 0;
+        pid_t waited;
+        do {
+            waited = waitpid(child, &status, 0);
+        } while (waited < 0 && errno == EINTR);
+        if (waited == child && WIFEXITED(status)) {
+            exit_code = WEXITSTATUS(status);
+        }
+    }
+#endif
+    if (!failed && exit_code) {
+        die("PDF compilation failed for %s (latexmk exit status %d)", source, exit_code);
+    }
+    if (!failed) {
+        const char *basename = strrchr(pdf, '/');
+        basename = basename ? basename + 1 : pdf;
+        char *compiled = join(tex, basename), *target = join(tex, pdf);
+        if (strcmp(compiled, target) && copy_file(compiled, target)) {
+            die("cannot install compiled PDF %s", target);
+        } else if (!strcmp(compiled, target)) {
+            struct stat st;
+            if (stat(target, &st) || !S_ISREG(st.st_mode)) {
+                die("latexmk did not create %s", target);
+            }
+        }
+        free(compiled);
+        free(target);
+    }
+    free(source);
+    free(pdf);
+}
+
 /* Stage each build so parsing and writing errors leave the last successful output alone. */
-static int build(void) {
+static int build(int compile_pdf) {
     clear_project();
     free(doc_title);
     doc_title = NULL;
@@ -107,7 +180,9 @@ static int build(void) {
         remove_tree(dummy);
         free(dummy);
     }
-    if (!failed && !strcmp(format, "both")) {
+    if (!failed && compile_pdf) {
+        build_pdf(tex);
+    } else if (!failed && !strcmp(format, "both")) {
         char *pdf = document_pdf_name();
         char *old_tex = join(output, "tex"), *old_pdf = join(old_tex, pdf);
         char *new_pdf = join(tex, pdf);
@@ -166,7 +241,7 @@ int main(int argc, char **argv) {
             return 0;
         }
     }
-    int watch = 0, serve = 0, explicit_config = 0, explicit_format = 0;
+    int watch = 0, serve = 0, explicit_config = 0;
     char *input_arg = ".";
     int input_is_dir = 1;
     format = xstrdup("html");
@@ -241,7 +316,6 @@ int main(int argc, char **argv) {
                 }
             } else if (!strcmp(a, "-f")) {
                 format = v;
-                explicit_format = 1;
             } else if (!strcmp(a, "-o")) {
                 snprintf(output, sizeof(output), "%s", v);
 #ifdef _WIN32
@@ -266,9 +340,6 @@ int main(int argc, char **argv) {
             die("unknown or incomplete option %s", a);
             return 1;
         }
-    }
-    if (serve && !explicit_format) {
-        format = "html";
     }
     if (!root || (strcmp(format, "html") && strcmp(format, "tex") && strcmp(format, "both"))) {
         usage();
@@ -298,7 +369,7 @@ int main(int argc, char **argv) {
         snprintf(output, sizeof(output), "%s", absolute);
         free(absolute);
     }
-    if (build()) {
+    if (build(watch && !strcmp(format, "both"))) {
         if (!watch) {
             fprintf(stderr, "myne: build failed; output was not refreshed. Fix the errors above and rerun.\n");
             return 1;
@@ -320,7 +391,7 @@ int main(int argc, char **argv) {
         unsigned long long next = fingerprint_dir("", 0);
         if (next != previous) {
             previous = next;
-            if (build()) {
+            if (build(watch && !strcmp(format, "both"))) {
                 fprintf(stderr,
                         "myne: rebuild failed; output was not refreshed. Fix the errors above; "
                         "Myne will retry after another project file change.\n");
