@@ -496,6 +496,11 @@ static void inline_html(Buf *b, const char *s, size_t n, int depth) {
                 name++;
             }
             if (name == i + 1) {
+                if (i + 1 < n && s[i + 1] == '\\') {
+                    add(b, "<br>");
+                    i += 2;
+                    continue;
+                }
                 if (i + 1 < n && strchr("%&_#{}$", s[i + 1])) {
                     escape_n(b, s + i + 1, 1);
                     i += 2;
@@ -505,6 +510,15 @@ static void inline_html(Buf *b, const char *s, size_t n, int depth) {
                 continue;
             }
             char *cmd = slice(s + i + 1, name - i - 1);
+            if (!strcmp(cmd, "and")) {
+                add(b, " and ");
+                i = name;
+                while (i < n && isspace((unsigned char)s[i])) {
+                    i++;
+                }
+                free(cmd);
+                continue;
+            }
             size_t p = name;
             char *arg = NULL;
             if (!strcmp(cmd, "includegraphics") && p < n && s[p] == '[') {
@@ -612,15 +626,36 @@ static void text_html(const char *s) {
     if (current == 0 && ends(files[root_index].rel, ".tex")) {
         const char *begin = strstr(s, "\\begin{document}");
         if (begin) {
-            const char *scan = s, *title;
-            while ((title = strstr(scan, "\\title")) && title < begin) {
-                size_t p = (size_t)(title - s) + strlen("\\title");
-                char *arg = NULL;
-                if (arg_at(s, begin - s, &p, &arg)) {
-                    free(doc_title);
-                    doc_title = arg;
+            const char *scan = s;
+            while (scan < begin) {
+                if (*scan == '%' && (scan == s || scan[-1] != '\\')) {
+                    while (scan < begin && *scan != '\n') {
+                        scan++;
+                    }
+                    continue;
                 }
-                scan = title + strlen("\\title");
+                if (*scan == '\\') {
+                    const char *name = scan + 1;
+                    while (name < begin && isalpha((unsigned char)*name)) {
+                        name++;
+                    }
+                    size_t len = name - (scan + 1);
+                    if ((len == 5 && !strncmp(scan + 1, "title", 5)) ||
+                        (len == 6 && !strncmp(scan + 1, "author", 6))) {
+                        size_t p = name - s;
+                        char *arg = NULL;
+                        if (arg_at(s, begin - s, &p, &arg)) {
+                            char **target = len == 5 ? &doc_title : &doc_author;
+                            free(*target);
+                            *target = arg;
+                            scan = s + p;
+                            continue;
+                        }
+                    }
+                    scan = name;
+                    continue;
+                }
+                scan++;
             }
             s = begin + strlen("\\begin{document}");
             while (isspace((unsigned char)*s)) {
@@ -643,6 +678,19 @@ static void text_html(const char *s) {
             }
             char *cmd = slice(s + i + 1, k - i - 1);
             int type = structural(cmd);
+            if (!strcmp(cmd, "author")) {
+                size_t p = k;
+                char *arg = NULL;
+                if (arg_at(s, n, &p, &arg)) {
+                    inline_html(&pages[current].body, s + start, i - start, 0);
+                    free(doc_author);
+                    doc_author = arg;
+                    i = p;
+                    start = i;
+                    free(cmd);
+                    continue;
+                }
+            }
             if (!strcmp(cmd, "appendix")) {
                 inline_html(&pages[current].body, s + start, i - start, 0);
                 Buf number = {0};
@@ -954,6 +1002,15 @@ int render_html_document(void) {
     }
     free(pages[0].title);
     pages[0].title = xstrdup(doc_title);
+    if (doc_author && *doc_author) {
+        int previous_page = current;
+        current = 0;
+        add(&pages[0].byline, "<p class=authors>");
+        char *trimmed = trim(doc_author);
+        inline_html(&pages[0].byline, trimmed, strlen(trimmed), 0);
+        add(&pages[0].byline, "</p>");
+        current = previous_page;
+    }
     append_references();
     return 0;
 }

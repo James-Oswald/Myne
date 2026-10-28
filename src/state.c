@@ -30,3 +30,4 @@ volatile unsigned long epoch;
 pthread_mutex_t epoch_lock = PTHREAD_MUTEX_INITIALIZER;
 int nfoot;
 char *doc_title;
+char *doc_author;

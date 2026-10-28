@@ -89,7 +89,7 @@ typedef struct {
 
 typedef struct {
     char *title, *slug, *number;
-    Buf body, notes, toc;
+    Buf body, byline, notes, toc;
     int toc_count;
     int part, heading;
     int appendix_group, appendix;
@@ -151,6 +151,7 @@ extern volatile unsigned long epoch;
 extern pthread_mutex_t epoch_lock;
 extern int nfoot;
 extern char *doc_title;
+extern char *doc_author;
 
 void add(Buf *b, const char *s);
 void addn(Buf *b, const char *s, size_t n);

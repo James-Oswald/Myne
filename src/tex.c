@@ -27,6 +27,13 @@ static char *rewrite_refs(const char *s, const char *source) {
                 kind = 1;
             } else if (graphic_at(s, n, i, &end, &arg)) {
                 kind = 2;
+            } else if (i + strlen("\\bibliographystyle") <= n &&
+                       !strncmp(s + i, "\\bibliographystyle", strlen("\\bibliographystyle"))) {
+                size_t p = i + strlen("\\bibliographystyle");
+                if (arg_at(s, n, &p, &arg)) {
+                    kind = 4;
+                    end = p;
+                }
             } else if (i + 13 < n && !strncmp(s + i, "\\bibliography", 13)) {
                 size_t p = i + 13;
                 if (arg_at(s, n, &p, &arg)) {
@@ -63,7 +70,7 @@ static char *rewrite_refs(const char *s, const char *source) {
                 free(rel);
             }
             free(path);
-        } else {
+        } else if (kind == 3) {
             char *list = xstrdup(arg), *one = strtok(list, ",");
             int first = 1;
             while (one) {
@@ -91,6 +98,27 @@ static char *rewrite_refs(const char *s, const char *source) {
                 one = strtok(NULL, ",");
             }
             free(list);
+        } else {
+            char *name = xstrdup(arg);
+            char *trimmed = trim(name);
+            Buf bst = {0};
+            add(&bst, trimmed);
+            if (!ends(bst.s, ".bst")) {
+                add(&bst, ".bst");
+            }
+            char *path = path_from(source, bst.s), *rel = project_rel(path);
+            if (rel) {
+                if (ends(rel, ".bst")) {
+                    rel[strlen(rel) - 4] = 0;
+                }
+                add(&b, rel);
+                free(rel);
+            } else {
+                add(&b, arg);
+            }
+            free(path);
+            free(bst.s);
+            free(name);
         }
         ch(&b, '}');
         free(arg);

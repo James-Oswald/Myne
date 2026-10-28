@@ -20,6 +20,27 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 class MyneTests(unittest.TestCase):
+    def test_tex_output_rewrites_local_bibliography_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "src").mkdir()
+            (base / "myne.toml").write_text('root = "src/main.tex"\nformat = "tex"\n')
+            (base / "src/kr.bst").write_text("% local bibliography style\n")
+            (base / "src/refs.bib").write_text("@article{sample, title={Sample}}\n")
+            (base / "src/main.tex").write_text(
+                "\\documentclass{article}\n\\begin{document}\n"
+                "\\bibliographystyle{kr}\n\\bibliography{refs}\n"
+                "\\end{document}\n"
+            )
+
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            generated = (base / "out/tex/src/main.tex").read_text()
+            self.assertIn(r"\bibliographystyle{src/kr}", generated)
+            self.assertIn(r"\bibliography{src/refs}", generated)
+            self.assertTrue((base / "out/tex/src/kr.bst").is_file())
+            self.assertTrue((base / "out/tex/src/refs.bib").is_file())
+
     def test_latex_abstract_and_local_contents(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -30,6 +51,7 @@ class MyneTests(unittest.TestCase):
             (base / "main.tex").write_text(
                 r"\documentclass{article}" "\n"
                 r"\title{A Test Paper}" "\n"
+                r"\author{Ada $^1$\and Bob $^2$\\Institute}" "\n"
                 r"\begin{document}\maketitle" "\n"
                 r"\begin{abstract}A result about $x^2$.\end{abstract}" "\n"
                 r"\section{Background}Overview." "\n"
@@ -47,7 +69,12 @@ class MyneTests(unittest.TestCase):
             translations = (html_dir / "section-004.html").read_text()
             leaf = (html_dir / "subsection-002.html").read_text()
 
-            self.assertIn('<main><h1>A Test Paper</h1><section class=abstract>', title)
+            self.assertIn(
+                '<main><h1>A Test Paper</h1><p class=authors>'
+                'Ada <span class=math>$^1$</span> and Bob '
+                '<span class=math>$^2$</span><br>Institute</p>'
+                '<section class=abstract>', title,
+            )
             self.assertIn('<h2>Abstract</h2><p>A result about <span class=math>$x^2$</span>.', title)
             self.assertIn('aria-label="Document contents"', title)
             self.assertIn('href="section-001.html"><span class=heading-number>1</span> Background', title)

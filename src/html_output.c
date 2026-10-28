@@ -318,6 +318,9 @@ void write_html(const char *dir) {
         }
         escape(&html, pages[i].title);
         add(&html, "</h1>");
+        if (i == 0 && pages[0].byline.n) {
+            addn(&html, pages[0].byline.s, pages[0].byline.n);
+        }
         addn(&html, pages[i].body.s ? pages[i].body.s : "", pages[i].body.n);
         if (pages[i].heading == 2) {
             add(&html, "<ul class=part-list>");

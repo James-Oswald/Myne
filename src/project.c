@@ -473,6 +473,7 @@ void clear_project(void) {
         free(pages[i].slug);
         free(pages[i].number);
         free(pages[i].body.s);
+        free(pages[i].byline.s);
         free(pages[i].notes.s);
         free(pages[i].toc.s);
         memset(&pages[i], 0, sizeof(Page));

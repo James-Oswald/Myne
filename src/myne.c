@@ -80,6 +80,8 @@ static int build(int compile_pdf) {
     clear_project();
     free(doc_title);
     doc_title = NULL;
+    free(doc_author);
+    doc_author = NULL;
     char *rel = NULL;
     if (root[0] == '/') {
         rel = project_rel(root);
