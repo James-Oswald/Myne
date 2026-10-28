@@ -2,24 +2,85 @@
 
 static char config_path[PATH_MAX];
 
+static int latex_error_line(const char *line) {
+    return strstr(line, ": LaTeX Error:") ||
+           (strstr(line, ": Package ") && strstr(line, " Error:")) ||
+           strstr(line, ": Undefined control sequence") || strstr(line, ": Missing ") ||
+           strstr(line, ": Emergency stop") || strstr(line, "Runaway argument") ||
+           strstr(line, "Fatal error") || strstr(line, "I couldn't open") ||
+           strstr(line, "could not be found") || strstr(line, "cannot run latexmk") ||
+           strstr(line, "not found") || !strncmp(line, "! ", 2);
+}
+
+static int latex_source_error_line(const char *line) {
+    const char *p = strstr(line, ".tex:");
+    if (!p) return 0;
+    p += 5;
+    if (!isdigit((unsigned char)*p)) return 0;
+    while (isdigit((unsigned char)*p)) p++;
+    if (*p++ != ':') return 0;
+    while (isspace((unsigned char)*p)) p++;
+    return *p && !strstr(p, "Warning") && !strstr(p, "Overfull") &&
+           !strstr(p, "Underfull") && !strstr(p, "Fatal error occurred");
+}
+
+static void report_latex_errors(const char *run_log) {
+    FILE *in = fopen(run_log, "r");
+    if (!in) {
+        fprintf(stderr, "myne: could not read captured LaTeX output %s\n", run_log);
+        return;
+    }
+    char line[4096];
+    int shown = 0, context = 0;
+    while (fgets(line, sizeof(line), in)) {
+        if (strstr(line, "==> Fatal error occurred") && shown) continue;
+        if (latex_error_line(line) || latex_source_error_line(line)) {
+            if (!shown++) fputs("myne: LaTeX errors:\n", stderr);
+            fprintf(stderr, "  %s", line);
+            context = line[0] == '!' || latex_source_error_line(line) ? 4 : 0;
+        } else if (context > 0) {
+            context--;
+            if ((line[0] == 'l' && line[1] == '.') || line[0] == '<') {
+                fprintf(stderr, "  %s", line);
+                context = 0;
+            }
+        }
+    }
+    fclose(in);
+    if (!shown) {
+        fprintf(stderr, "myne: no TeX error line found; compiler output was %s\n", run_log);
+    }
+}
+
 /* Compile a watched TeX tree before publishing it to the local server. */
 static void build_pdf(const char *tex) {
     char *pdf = document_pdf_name();
     char *source = xstrdup(pdf);
     strcpy(source + strlen(source) - 4, ".tex");
+    char *run_log = join(tex, ".myne-latexmk.log");
     int exit_code = 1;
 #ifdef _WIN32
     STARTUPINFOA startup = {0};
     PROCESS_INFORMATION process = {0};
     startup.cb = sizeof(startup);
-    size_t command_cap = strlen(source) + 100;
+    SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
+    HANDLE output = CreateFileA(run_log, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                &security, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (output == INVALID_HANDLE_VALUE) {
+        die("cannot capture LaTeX output in %s", run_log);
+    }
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = output;
+    startup.hStdError = output;
+    size_t command_cap = strlen(source) + 140;
     char *command = xmalloc(command_cap);
     snprintf(command, command_cap,
-             "latexmk -pdf -interaction=nonstopmode -halt-on-error -quiet \"%s\"", source);
-    if (!CreateProcessA(NULL, command, NULL, NULL, FALSE, 0, NULL, tex, &startup, &process)) {
+             "latexmk -pdf -interaction=nonstopmode -halt-on-error -file-line-error \"%s\"", source);
+    if (!failed && !CreateProcessA(NULL, command, NULL, NULL, TRUE, 0, NULL, tex, &startup, &process)) {
         die("cannot start latexmk for %s (Windows error %lu)", source,
             (unsigned long)GetLastError());
-    } else {
+    } else if (!failed) {
         WaitForSingleObject(process.hProcess, INFINITE);
         DWORD code = 1;
         GetExitCodeProcess(process.hProcess, &code);
@@ -27,22 +88,33 @@ static void build_pdf(const char *tex) {
         CloseHandle(process.hThread);
         CloseHandle(process.hProcess);
     }
+    CloseHandle(output);
     free(command);
 #else
-    pid_t child = fork();
+    int output = open(run_log, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (output < 0) {
+        die("cannot capture LaTeX output in %s: %s", run_log, strerror(errno));
+    }
+    pid_t child = failed ? -1 : fork();
     if (child == 0) {
         if (chdir(tex)) {
             perror("myne: cannot enter TeX output directory");
             _exit(127);
         }
+        if (dup2(output, STDOUT_FILENO) < 0 || dup2(output, STDERR_FILENO) < 0) {
+            perror("myne: cannot capture LaTeX output");
+            _exit(127);
+        }
+        close(output);
         execlp("latexmk", "latexmk", "-pdf", "-interaction=nonstopmode",
-               "-halt-on-error", "-quiet", source, (char *)NULL);
+               "-halt-on-error", "-file-line-error", source, (char *)NULL);
         perror("myne: cannot run latexmk");
         _exit(127);
     }
-    if (child < 0) {
+    close(output);
+    if (child < 0 && !failed) {
         die("cannot start latexmk for %s: %s", source, strerror(errno));
-    } else {
+    } else if (child > 0) {
         int status = 0;
         pid_t waited;
         do {
@@ -55,6 +127,7 @@ static void build_pdf(const char *tex) {
 #endif
     if (!failed && exit_code) {
         die("PDF compilation failed for %s (latexmk exit status %d)", source, exit_code);
+        report_latex_errors(run_log);
     }
     if (!failed) {
         const char *basename = strrchr(pdf, '/');
@@ -71,6 +144,8 @@ static void build_pdf(const char *tex) {
         free(compiled);
         free(target);
     }
+    remove(run_log);
+    free(run_log);
     free(source);
     free(pdf);
 }
