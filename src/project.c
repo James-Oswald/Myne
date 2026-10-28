@@ -505,6 +505,8 @@ void clear_project(void) {
         free(bibs[i].author);
         free(bibs[i].title);
         free(bibs[i].year);
+        free(bibs[i].url);
+        free(bibs[i].doi);
     }
     nfiles = nsegs = nappendix_segs = npages = nbibs = ncites = nfoot =
         ndependency_nodes = 0;

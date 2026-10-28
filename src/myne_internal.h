@@ -107,7 +107,7 @@ typedef struct {
 } LeanDependencyDecl;
 
 typedef struct {
-    char *key, *author, *title, *year;
+    char *key, *author, *title, *year, *url, *doi;
     int number;
 } Bib;
 

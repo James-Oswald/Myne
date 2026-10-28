@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded',()=>{
-  if(window.renderMathInElement)renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],throwOnError:false});
+  if(window.renderMathInElement)renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\[',right:'\\]',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false}],throwOnError:false});
   const themeToggle=document.querySelector('.theme-toggle');
   if(themeToggle){
     const applyTheme=theme=>{

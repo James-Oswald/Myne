@@ -113,6 +113,8 @@ static void parse_bib(const char *rel) {
             b->author = field(entry, "author");
             b->title = field(entry, "title");
             b->year = field(entry, "year");
+            b->url = field(entry, "url");
+            b->doi = field(entry, "doi");
             b->number = 0;
             free(entry);
         } else {
@@ -289,49 +291,176 @@ static void new_page(const char *title, int heading, const char *number) {
 
 static void inline_html(Buf *b, const char *s, size_t n, int depth);
 
-static void cite_html(Buf *b, const char *key, int textual) {
-    Bib *entry = bib_lookup(key);
-    if (!entry) {
-        die("unknown citation %s", key);
-        escape(b, key);
+/* BibTeX grouping braces protect capitalization; they are not printed. Keep math
+   delimiters intact for the bundled KaTeX auto-renderer. */
+static void bib_text_html(Buf *b, const char *s) {
+    size_t n = strlen(s);
+    for (size_t i = 0; i < n;) {
+        if (s[i] == '$') {
+            size_t start = i, delim = i + 1 < n && s[i + 1] == '$' ? 2 : 1;
+            const char *end = finds(s + i + delim, n - i - delim, delim == 2 ? "$$" : "$");
+            if (end) {
+                i = (size_t)(end - s) + delim;
+                escape_n(b, s + start, i - start);
+                continue;
+            }
+        }
+        if (s[i] == '\\' && i + 1 < n && (s[i + 1] == '(' || s[i + 1] == '[')) {
+            const char *end = finds(s + i + 2, n - i - 2, s[i + 1] == '(' ? "\\)" : "\\]");
+            if (end) {
+                size_t start = i;
+                i = (size_t)(end - s) + 2;
+                escape_n(b, s + start, i - start);
+                continue;
+            }
+        }
+        if (s[i] == '{' || s[i] == '}') {
+            i++;
+            continue;
+        }
+        if (s[i] == '\\' && i + 1 < n) {
+            char command = s[i + 1];
+            const char *accent = command == '~' ? "\xcc\x83" : command == '\'' ? "\xcc\x81"
+                                 : command == '`' ? "\xcc\x80" : command == '^' ? "\xcc\x82"
+                                 : command == '"' ? "\xcc\x88" : NULL;
+            if (accent) {
+                i += 2;
+                while (i < n && s[i] == '{') {
+                    i++;
+                }
+                if (i < n && s[i] != '}') {
+                    escape_n(b, s + i, 1);
+                    i++;
+                    add(b, accent);
+                }
+                continue;
+            }
+            if (strchr("&%_#{}$", command)) {
+                escape_n(b, s + i + 1, 1);
+                i += 2;
+                continue;
+            }
+            if (!strncmp(s + i, "\\LaTeX", 6)) {
+                add(b, "LaTeX");
+                i += 6;
+                continue;
+            }
+            if (!strncmp(s + i, "\\TeX", 4)) {
+                add(b, "TeX");
+                i += 4;
+                continue;
+            }
+        }
+        escape_n(b, s + i, 1);
+        i++;
+    }
+}
+
+static void bib_title_html(Buf *b, const Bib *entry) {
+    const char *url = NULL;
+    Buf doi_url = {0};
+    if (!strncmp(entry->url, "https://", 8) || !strncmp(entry->url, "http://", 7)) {
+        url = entry->url;
+    } else if (*entry->doi) {
+        const char *doi = entry->doi;
+        if (!strncasecmp(doi, "https://doi.org/", 16)) {
+            doi += 16;
+        } else if (!strncasecmp(doi, "http://doi.org/", 15)) {
+            doi += 15;
+        } else if (!strncasecmp(doi, "doi:", 4)) {
+            doi += 4;
+        }
+        if (!strpbrk(doi, " \t\r\n\"<>")) {
+            add(&doi_url, "https://doi.org/");
+            add(&doi_url, doi);
+            url = doi_url.s;
+        }
+    }
+    add(b, "<i>");
+    if (url) {
+        add(b, "<a href=\"");
+        escape(b, url);
+        add(b, "\">");
+    }
+    bib_text_html(b, entry->title);
+    if (url) {
+        add(b, "</a>");
+    }
+    add(b, "</i>");
+    free(doi_url.s);
+}
+
+static void bib_reference_html(Buf *b, const Bib *entry, const char *separator) {
+    bib_text_html(b, entry->author);
+    add(b, separator);
+    bib_title_html(b, entry);
+    add(b, " (");
+    bib_text_html(b, entry->year);
+    add(b, ")");
+}
+
+static void citation_number(Buf *b, const Bib *entry) {
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "%d", entry->number);
+    add(b, tmp);
+}
+
+static void cite_group_html(Buf *b, char *keys, int textual) {
+    Bib *entries[MAX_BIB];
+    int count = 0;
+    for (char *key = strtok(keys, ","); key; key = strtok(NULL, ",")) {
+        key = trim(key);
+        Bib *entry = bib_lookup(key);
+        if (!entry) {
+            die("unknown citation %s", key);
+            continue;
+        }
+        if (!entry->number) {
+            entry->number = ++ncites;
+        }
+        if (count >= MAX_BIB) {
+            die("too many citations in one group");
+            break;
+        }
+        entries[count++] = entry;
+    }
+    if (!count) {
         return;
     }
-    if (!entry->number) {
-        entry->number = ++ncites;
-    }
     if (textual) {
-        escape(b, entry->author);
-        add(b, " (");
-        escape(b, entry->year);
-        add(b, ")");
-        char number[32];
-        snprintf(number, sizeof(number), "%d", entry->number);
-        add(b, "<sup class=notemark>");
-        add(b, number);
-        add(b, "</sup>");
-    } else {
-        add(b, "<sup class=notemark>[<a href=\"#ref-");
-        escape(b, key);
-        add(b, "\">");
-        char tmp[32];
-        snprintf(tmp, sizeof(tmp), "%d", entry->number);
-        add(b, tmp);
-        add(b, "</a>]</sup>");
+        for (int i = 0; i < count; i++) {
+            if (i) add(b, "; ");
+            bib_text_html(b, entries[i]->author);
+            add(b, " (");
+            bib_text_html(b, entries[i]->year);
+            add(b, ")");
+        }
+        ch(b, ' ');
     }
-    Buf note = {0};
-    escape(&note, entry->author);
-    add(&note, ", <i>");
-    escape(&note, entry->title);
-    add(&note, "</i> (");
-    escape(&note, entry->year);
-    add(&note, ")");
-    add(b, "<span class=sidenote>");
-    add(b, note.s);
-    add(b, "</span>");
-    add(&pages[current].notes, "<li>");
-    add(&pages[current].notes, note.s);
-    add(&pages[current].notes, "</li>");
-    free(note.s);
+    add(b, "<span class=citation>[");
+    for (int i = 0; i < count; i++) {
+        if (i) add(b, ",");
+        add(b, "<a href=\"#ref-");
+        escape(b, entries[i]->key);
+        add(b, "\">");
+        citation_number(b, entries[i]);
+        add(b, "</a>");
+    }
+    add(b, "]</span>");
+    for (int i = 0; i < count; i++) {
+        Buf note = {0};
+        add(&note, "<span class=reference-number>[");
+        citation_number(&note, entries[i]);
+        add(&note, "]</span> ");
+        bib_reference_html(&note, entries[i], ", ");
+        add(b, "<span class=sidenote>");
+        add(b, note.s);
+        add(b, "</span>");
+        add(&pages[current].notes, "<li class=reference-note>");
+        add(&pages[current].notes, note.s);
+        add(&pages[current].notes, "</li>");
+        free(note.s);
+    }
 }
 
 /* Interpret the supported inline TeX commands and math delimiters. */
@@ -392,15 +521,7 @@ static void inline_html(Buf *b, const char *s, size_t n, int depth) {
                 inline_html(b, arg, strlen(arg), depth + 1);
                 add(b, !strcmp(cmd, "textit") ? "</em>" : "</strong>");
             } else if (has && (!strcmp(cmd, "cite") || !strcmp(cmd, "citet"))) {
-                char *key = strtok(arg, ",");
-                int first = 1;
-                while (key) {
-                    if (!first++) {
-                        add(b, "; ");
-                    }
-                    cite_html(b, trim(key), !strcmp(cmd, "citet"));
-                    key = strtok(NULL, ",");
-                }
+                cite_group_html(b, arg, !strcmp(cmd, "citet"));
             } else if (has && !strcmp(cmd, "footnote")) {
                 char tmp[32];
                 snprintf(tmp, sizeof(tmp), "%d", ++nfoot);
@@ -639,6 +760,23 @@ static void append_references(void) {
         return;
     }
     int page = bib_page >= 0 ? bib_page : npages - 1;
+    for (int i = 0; i < npages; i++) {
+        if (i == page || !pages[i].body.s) {
+            continue;
+        }
+        Buf linked = {0};
+        const char *cursor = pages[i].body.s, *hit;
+        while ((hit = strstr(cursor, "href=\"#ref-"))) {
+            addn(&linked, cursor, hit - cursor);
+            add(&linked, "href=\"");
+            escape(&linked, pages[page].slug);
+            add(&linked, "#ref-");
+            cursor = hit + strlen("href=\"#ref-");
+        }
+        add(&linked, cursor);
+        free(pages[i].body.s);
+        pages[i].body = linked;
+    }
     Buf *b = &pages[page].body;
     add(b, "<section class=references><h2>References</h2><ol>");
     for (int num = 1; num <= ncites; num++) {
@@ -647,12 +785,8 @@ static void append_references(void) {
                 add(b, "<li id=\"ref-");
                 escape(b, bibs[i].key);
                 add(b, "\">");
-                escape(b, bibs[i].author);
-                add(b, ". <i>");
-                escape(b, bibs[i].title);
-                add(b, "</i> (");
-                escape(b, bibs[i].year);
-                add(b, ")</li>");
+                bib_reference_html(b, &bibs[i], ". ");
+                add(b, "</li>");
             }
         }
     }

@@ -20,6 +20,51 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 class MyneTests(unittest.TestCase):
+    def test_web_references_have_inline_numbers_math_and_title_links(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text(
+                'root = "main.tex"\nformat = "html"\nbibliography = ["refs.bib"]\n'
+            )
+            (base / "main.tex").write_text(
+                r"\title{References}" "\n"
+                r"\section{Introduction}See \cite{alpha,beta} and \citet{alpha}." "\n"
+                r"\section{Sources}\bibliography{refs}" "\n"
+            )
+            (base / "refs.bib").write_text(
+                "@article{alpha,\n"
+                r"author={Pe{\~{n}}aloza}, title={{OWL} $\mathcal{A}$}, "
+                r"year={2025}, url={https://example.org/paper?a=1&b=2}}" "\n"
+                "@article{beta,\n"
+                r"author={Other Author}, title={Theory \(x^2\)}, "
+                r"year={2024}, doi={10.1000/example}}" "\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            intro = (base / "out/html/section-001.html").read_text()
+            refs = (base / "out/html/section-002.html").read_text()
+            runtime = (base / "out/html/runtime.js").read_text()
+
+            self.assertIn(
+                '<span class=citation>[<a href="section-002.html#ref-alpha">1</a>,'
+                '<a href="section-002.html#ref-beta">2</a>]</span>', intro,
+            )
+            self.assertIn('<span class=reference-number>[1]</span>', intro)
+            self.assertIn('<span class=reference-number>[2]</span>', intro)
+            self.assertIn('<li class=reference-note>', intro)
+            self.assertNotIn('<sup class=notemark>', intro)
+            self.assertIn('href="https://example.org/paper?a=1&amp;b=2"', intro)
+            self.assertIn('href="https://doi.org/10.1000/example"', refs)
+            self.assertIn(
+                '<i><a href="https://example.org/paper?a=1&amp;b=2">'
+                'OWL $\\mathcal{A}$</a></i>', refs,
+            )
+            self.assertIn('OWL $\\mathcal{A}$', refs)
+            self.assertIn('Theory \\(x^2\\)', refs)
+            self.assertNotIn(r"{\~{n}}", refs)
+            self.assertIn("renderMathInElement(document.body", runtime)
+            self.assertIn(r"left:'\\('", runtime)
+
     @unittest.skipUnless(shutil.which("latexmk"), "latexmk is required")
     def test_watch_both_compiles_pdf_and_reports_latex_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -172,6 +172,9 @@ pre {
 }
 
 .notemark { font: 700 0.7rem system-ui, sans-serif; }
+.citation { white-space: nowrap; }
+.reference-number { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mobile-notes li.reference-note { list-style: none; }
 .references { margin-top: 3rem; border-top: 1px solid #ccd4dc; }
 .references li { margin: 0.7rem 0; }
 .part-list { padding-left: 1.2rem; }
