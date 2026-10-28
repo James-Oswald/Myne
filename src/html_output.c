@@ -60,31 +60,50 @@ static void theme_toggle_html(Buf *b) {
 }
 
 static void page_toc_html(Buf *b, int page) {
-    if (!web_table_of_contents || pages[page].heading < 2 ||
-        pages[page].heading >= page_heading_level) {
+    if (!web_table_of_contents) {
+        return;
+    }
+    int root = page == 0;
+    int root_heading = 7;
+    if (root) {
+        for (int j = 1; j < npages; j++) {
+            if (!pages[j].appendix && !pages[j].appendix_group &&
+                pages[j].heading >= 2 && pages[j].heading < root_heading) {
+                root_heading = pages[j].heading;
+            }
+        }
+        if (root_heading == 7) {
+            return;
+        }
+    } else if (pages[page].heading < 2 || pages[page].heading >= page_heading_level) {
         return;
     }
     int child_pages = 0;
     for (int j = page + 1; j < npages; j++) {
-        if (pages[j].heading <= pages[page].heading) {
+        if (!root && (pages[j].heading <= pages[page].heading || pages[j].appendix_group)) {
             break;
         }
-        if (pages[j].heading == pages[page].heading + 1) {
+        if (root ? (!pages[j].appendix &&
+                    (pages[j].heading == root_heading || pages[j].appendix_group))
+                 : pages[j].heading == pages[page].heading + 1) {
             child_pages++;
         }
     }
     if (!child_pages && !pages[page].toc_count) {
         return;
     }
-    add(b, "<nav class=page-toc aria-label=\"On this page\"><h2>Contents</h2><ul>");
+    add(b, root ? "<nav class=page-toc aria-label=\"Document contents\"><h2>Contents</h2><ul>"
+                : "<nav class=page-toc aria-label=\"On this page\"><h2>Contents</h2><ul>");
     if (pages[page].toc.s) {
         addn(b, pages[page].toc.s, pages[page].toc.n);
     }
     for (int j = page + 1; j < npages; j++) {
-        if (pages[j].heading <= pages[page].heading) {
+        if (!root && (pages[j].heading <= pages[page].heading || pages[j].appendix_group)) {
             break;
         }
-        if (pages[j].heading != pages[page].heading + 1) {
+        if (root ? (pages[j].appendix ||
+                    (pages[j].heading != root_heading && !pages[j].appendix_group))
+                 : pages[j].heading != pages[page].heading + 1) {
             continue;
         }
         add(b, "<li><a href=\"");

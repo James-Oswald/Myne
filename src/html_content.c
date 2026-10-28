@@ -533,6 +533,25 @@ static void inline_html(Buf *b, const char *s, size_t n, int depth) {
                 add(&pages[current].notes, "<li>");
                 inline_html(&pages[current].notes, arg, strlen(arg), depth + 1);
                 add(&pages[current].notes, "</li>");
+            } else if (has && !strcmp(cmd, "begin") && !strcmp(arg, "abstract")) {
+                const char *end = finds(s + p, n - p, "\\end{abstract}");
+                if (!end) {
+                    die("unclosed abstract environment");
+                } else {
+                    char *contents = slice(s + p, end - (s + p));
+                    char *trimmed = trim(contents);
+                    add(&pages[0].body, "<section class=abstract><h2>Abstract</h2><p>");
+                    int previous_page = current;
+                    current = 0;
+                    inline_html(&pages[0].body, trimmed, strlen(trimmed), depth + 1);
+                    current = previous_page;
+                    add(&pages[0].body, "</p></section>");
+                    free(contents);
+                    p = (size_t)(end - s) + strlen("\\end{abstract}");
+                    while (p < n && isspace((unsigned char)s[p])) {
+                        p++;
+                    }
+                }
             } else if (has && !strcmp(cmd, "includegraphics")) {
                 add(b, "<img alt=\"\" src=\"");
                 escape(b, arg);
@@ -558,6 +577,10 @@ static void inline_html(Buf *b, const char *s, size_t n, int depth) {
             size_t j = i;
             while (j < n && (s[j] == '\n' || s[j] == '\r' || s[j] == ' ')) {
                 j++;
+            }
+            if (!b->n) {
+                i = j;
+                continue;
             }
             if (j - i > 1 && j < n) {
                 add(b, "<br><br>");
@@ -586,6 +609,25 @@ int structural(const char *name) {
 
 /* Structural commands split the document into navigable pages. */
 static void text_html(const char *s) {
+    if (current == 0 && ends(files[root_index].rel, ".tex")) {
+        const char *begin = strstr(s, "\\begin{document}");
+        if (begin) {
+            const char *scan = s, *title;
+            while ((title = strstr(scan, "\\title")) && title < begin) {
+                size_t p = (size_t)(title - s) + strlen("\\title");
+                char *arg = NULL;
+                if (arg_at(s, begin - s, &p, &arg)) {
+                    free(doc_title);
+                    doc_title = arg;
+                }
+                scan = title + strlen("\\title");
+            }
+            s = begin + strlen("\\begin{document}");
+            while (isspace((unsigned char)*s)) {
+                s++;
+            }
+        }
+    }
     size_t n = strlen(s), start = 0;
     for (size_t i = 0; i < n;) {
         if (s[i] == '%' && (i == 0 || s[i - 1] != '\\')) {
@@ -910,10 +952,8 @@ int render_html_document(void) {
     if (!doc_title) {
         doc_title = xstrdup(files[root_index].rel);
     }
-    if (npages == 1) {
-        free(pages[0].title);
-        pages[0].title = xstrdup(doc_title);
-    }
+    free(pages[0].title);
+    pages[0].title = xstrdup(doc_title);
     append_references();
     return 0;
 }

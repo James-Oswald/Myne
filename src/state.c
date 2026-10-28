@@ -22,7 +22,7 @@ char basedir[PATH_MAX], output[PATH_MAX];
 char *root, *format, *style, *tex_template, *tex_class, *page_heading, *bibcfg[64];
 int nbibcfg;
 int live, port = 8000, failed, root_index, tex_template_index = -1, tex_class_index = -1;
-int dark_mode_toggle = 1, page_heading_level, web_table_of_contents;
+int dark_mode_toggle = 1, page_heading_level, web_table_of_contents = 1;
 int chapter_number, section_number, subsection_number, subsubsection_number;
 int chapter_active, statement_number;
 char statement_scope[64];

@@ -118,6 +118,9 @@ main { max-width: 56rem; margin: 0 auto; padding: 3rem 2rem 6rem; }
 h1, h2, h3, h4 { line-height: 1.2; }
 h1 { font-size: 2.5rem; }
 p { line-height: 1.65; }
+.abstract { margin: 2rem 0; }
+.abstract h2 { font-size: 1.35rem; }
+.abstract p { line-height: 1.65; }
 img { max-width: 100%; height: auto; }
 
 pre {

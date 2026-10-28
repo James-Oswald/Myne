@@ -20,6 +20,51 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 class MyneTests(unittest.TestCase):
+    def test_latex_abstract_and_local_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            config = base / "myne.toml"
+            config.write_text(
+                'root = "main.tex"\nformat = "html"\n[web]\npageHeading = "subsection"\n'
+            )
+            (base / "main.tex").write_text(
+                r"\documentclass{article}" "\n"
+                r"\title{A Test Paper}" "\n"
+                r"\begin{document}\maketitle" "\n"
+                r"\begin{abstract}A result about $x^2$.\end{abstract}" "\n"
+                r"\section{Background}Overview." "\n"
+                r"\subsection{First}Details." "\n"
+                r"\subsection{Second}More details." "\n"
+                r"\section{Translations}" "\n"
+                r"\subsection{Third}Proof." "\n"
+                r"\end{document}" "\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            html_dir = base / "out/html"
+            title = (html_dir / "index.html").read_text()
+            background = (html_dir / "section-001.html").read_text()
+            translations = (html_dir / "section-004.html").read_text()
+            leaf = (html_dir / "subsection-002.html").read_text()
+
+            self.assertIn('<main><h1>A Test Paper</h1><section class=abstract>', title)
+            self.assertIn('<h2>Abstract</h2><p>A result about <span class=math>$x^2$</span>.', title)
+            self.assertIn('aria-label="Document contents"', title)
+            self.assertIn('href="section-001.html"><span class=heading-number>1</span> Background', title)
+            self.assertIn('href="section-004.html"><span class=heading-number>2</span> Translations', title)
+            self.assertIn('aria-label="On this page"', background)
+            self.assertIn('href="subsection-002.html"><span class=heading-number>1.1</span> First', background)
+            self.assertIn('href="subsection-003.html"><span class=heading-number>1.2</span> Second', background)
+            self.assertIn('href="subsection-005.html"><span class=heading-number>2.1</span> Third', translations)
+            self.assertNotIn('class=page-toc', leaf)
+            self.assertNotIn('class=abstract', background)
+
+            config.write_text(config.read_text() + 'tableOfContents = false\n')
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn('class=page-toc', (html_dir / "index.html").read_text())
+            self.assertNotIn('class=page-toc', (html_dir / "section-001.html").read_text())
+
     def test_web_references_have_inline_numbers_math_and_title_links(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -547,7 +592,8 @@ class MyneTests(unittest.TestCase):
             self.assertIn("nav-depth-0 heading-chapter", chapter)
             self.assertIn("nav-depth-1 heading-section", chapter)
             self.assertIn(
-                "<h2><span class=heading-number>1.1.1</span> Details</h2>", section
+                '<h2 id="page-heading-1"><span class=heading-number>1.1.1</span> Details</h2>',
+                section,
             )
             self.assertIn('class=theme-toggle', section)
             self.assertIn("localStorage.getItem('myne-theme')", section)
@@ -560,6 +606,7 @@ class MyneTests(unittest.TestCase):
                 'outputDir = "chapter-out"\n'
                 'pageHeading = "chapter"\n'
                 'darkModeToggle = false\n'
+                'tableOfContents = false\n'
             )
             result = run(cwd=base)
             self.assertEqual(result.returncode, 0, result.stderr)
