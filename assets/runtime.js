@@ -1,5 +1,39 @@
 document.addEventListener('DOMContentLoaded',()=>{
   if(window.renderMathInElement)renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\[',right:'\\]',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false}],throwOnError:false});
+  const referenceNotes=[...document.querySelectorAll('.reference-sidenote')];
+  if(referenceNotes.length){
+    const mobileNotes=new Map([...document.querySelectorAll('.mobile-notes .reference-note')]
+      .map(note=>[note.dataset.noteId,note]));
+    const repeatDistance=480; // Minimum vertical distance in CSS pixels between shown notes for one reference.
+    const updateReferenceNotes=()=>{
+      referenceNotes.forEach(note=>{
+        note.hidden=false;
+        const mobile=mobileNotes.get(note.dataset.noteId);
+        if(mobile)mobile.hidden=false;
+      });
+      const lastShown=new Map();
+      referenceNotes.forEach(note=>{
+        const anchor=document.getElementById(note.dataset.citeAnchor);
+        if(!anchor)return;
+        const top=anchor.getBoundingClientRect().top+window.scrollY;
+        const previous=lastShown.get(note.dataset.refNumber);
+        const show=previous===undefined||top-previous>=repeatDistance;
+        note.hidden=!show;
+        const mobile=mobileNotes.get(note.dataset.noteId);
+        if(mobile)mobile.hidden=!show;
+        if(show)lastShown.set(note.dataset.refNumber,top);
+      });
+    };
+    updateReferenceNotes();
+    if(document.fonts)document.fonts.ready.then(updateReferenceNotes);
+    window.addEventListener('load',updateReferenceNotes,{once:true});
+    let resizePending=false;
+    window.addEventListener('resize',()=>{
+      if(resizePending)return;
+      resizePending=true;
+      requestAnimationFrame(()=>{resizePending=false;updateReferenceNotes();});
+    });
+  }
   const themeToggle=document.querySelector('.theme-toggle');
   if(themeToggle){
     const applyTheme=theme=>{

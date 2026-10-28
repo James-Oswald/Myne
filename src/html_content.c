@@ -437,7 +437,11 @@ static void cite_group_html(Buf *b, char *keys, int textual) {
         }
         ch(b, ' ');
     }
-    add(b, "<span class=citation>[");
+    char anchor[32];
+    snprintf(anchor, sizeof(anchor), "cite-%d", ++pages[current].citation_count);
+    add(b, "<span class=citation id=\"");
+    add(b, anchor);
+    add(b, "\">[");
     for (int i = 0; i < count; i++) {
         if (i) add(b, ",");
         add(b, "<a href=\"#ref-");
@@ -448,15 +452,25 @@ static void cite_group_html(Buf *b, char *keys, int textual) {
     }
     add(b, "]</span>");
     for (int i = 0; i < count; i++) {
+        char note_id[64];
+        snprintf(note_id, sizeof(note_id), "%s-note-%d", anchor, i + 1);
         Buf note = {0};
         add(&note, "<span class=reference-number>[");
         citation_number(&note, entries[i]);
         add(&note, "]</span> ");
         bib_reference_html(&note, entries[i], ", ");
-        add(b, "<span class=sidenote>");
+        add(b, "<span class=\"sidenote reference-sidenote\" data-ref-number=\"");
+        citation_number(b, entries[i]);
+        add(b, "\" data-cite-anchor=\"");
+        add(b, anchor);
+        add(b, "\" data-note-id=\"");
+        add(b, note_id);
+        add(b, "\">");
         add(b, note.s);
         add(b, "</span>");
-        add(&pages[current].notes, "<li class=reference-note>");
+        add(&pages[current].notes, "<li class=reference-note data-note-id=\"");
+        add(&pages[current].notes, note_id);
+        add(&pages[current].notes, "\">");
         add(&pages[current].notes, note.s);
         add(&pages[current].notes, "</li>");
         free(note.s);

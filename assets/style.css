@@ -180,6 +180,7 @@ pre {
 .citation { white-space: nowrap; }
 .reference-number { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mobile-notes li.reference-note { list-style: none; }
+.reference-sidenote[hidden], .mobile-notes .reference-note[hidden] { display: none; }
 .references { margin-top: 3rem; border-top: 1px solid #ccd4dc; }
 .references.standalone { margin-top: 1rem; border-top: 0; }
 .references li { margin: 0.7rem 0; }

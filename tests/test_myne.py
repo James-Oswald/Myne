@@ -151,15 +151,18 @@ class MyneTests(unittest.TestCase):
             runtime = (html_dir / "runtime.js").read_text()
 
             self.assertIn(
-                '<span class=citation>[<a href="references.html#ref-alpha">1</a>,'
+                '<span class=citation id="cite-1">[<a href="references.html#ref-alpha">1</a>,'
                 '<a href="references.html#ref-beta">2</a>]</span>', intro,
             )
+            self.assertIn('data-ref-number="1" data-cite-anchor="cite-1"', intro)
+            self.assertIn('data-ref-number="2" data-cite-anchor="cite-1"', intro)
+            self.assertIn('data-ref-number="1" data-cite-anchor="cite-2"', intro)
             self.assertIn('<h1>References</h1><section class="references standalone">', refs)
             self.assertNotIn('class=references', sources)
             self.assertIn('href="references.html">References</a>', title)
             self.assertIn('<span class=reference-number>[1]</span>', intro)
             self.assertIn('<span class=reference-number>[2]</span>', intro)
-            self.assertIn('<li class=reference-note>', intro)
+            self.assertIn('<li class=reference-note data-note-id="cite-1-note-1">', intro)
             self.assertNotIn('<sup class=notemark>', intro)
             self.assertIn('href="https://example.org/paper?a=1&amp;b=2"', intro)
             self.assertIn('href="https://doi.org/10.1000/example"', refs)
@@ -182,6 +185,46 @@ class MyneTests(unittest.TestCase):
             self.assertIn('<section class=references><h2>References</h2><ol>', single_page)
             self.assertIn('href="#ref-alpha"', single_page)
             self.assertFalse((html_dir / "references.html").exists())
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required")
+    def test_repeated_margin_notes_use_visual_distance(self) -> None:
+        script = r"""
+const assert = require('assert');
+const fs = require('fs');
+const vm = require('vm');
+const positions = {a:100, b:170, c:300, d:700, e:710};
+const refs = ['13', '13', '13', '13', '14'];
+const keys = ['a', 'b', 'c', 'd', 'e'];
+const notes = keys.map((key, index) => ({
+  dataset: {citeAnchor:key, refNumber:refs[index], noteId:key}, hidden:false
+}));
+const mobile = keys.map(key => ({dataset:{noteId:key}, hidden:false})).reverse();
+const mobileHidden = () => keys.map(key => mobile.find(note=>note.dataset.noteId===key).hidden);
+const events = {};
+let ready;
+const document = {
+  body: {dataset:{live:'0'}},
+  addEventListener: (name, callback) => {if(name==='DOMContentLoaded')ready=callback;},
+  querySelectorAll: selector => selector==='.reference-sidenote' ? notes : mobile,
+  querySelector: () => null,
+  getElementById: key => ({getBoundingClientRect:() => ({top:positions[key]})})
+};
+const window = {scrollY:0, addEventListener:(name,callback) => {events[name]=callback;}};
+vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'),
+  {document,window,requestAnimationFrame:callback=>callback()});
+ready();
+assert.deepStrictEqual(notes.map(note=>note.hidden), [false,true,true,false,false]);
+assert.deepStrictEqual(mobileHidden(), [false,true,true,false,false]);
+positions.d=500;
+events.resize();
+assert.deepStrictEqual(notes.map(note=>note.hidden), [false,true,true,true,false]);
+assert.deepStrictEqual(mobileHidden(), [false,true,true,true,false]);
+"""
+        result = subprocess.run(
+            [shutil.which("node"), "-e", script, str(REPO / "assets/runtime.js")],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipUnless(shutil.which("latexmk"), "latexmk is required")
     def test_watch_both_compiles_pdf_and_reports_latex_errors(self) -> None:

@@ -90,7 +90,7 @@ typedef struct {
 typedef struct {
     char *title, *slug, *number;
     Buf body, byline, notes, toc;
-    int toc_count;
+    int toc_count, citation_count;
     int part, heading;
     int appendix_group, appendix, references;
 } Page;

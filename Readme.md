@@ -142,6 +142,7 @@ for now:
 - `\cite{...}` for citations within the text
 - `\citet{...}` for textual citations
 - `\bibliography{...}` for including a bibliography file and reference list.
+The web output keeps every inline citation marker. Margin and mobile reference notes repeat only when the same source is at least 480 CSS pixels away from its last visible note.
 ##### Footnotes
 - `\footnote{...}` for footnotes within the text
 
