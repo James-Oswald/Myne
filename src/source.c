@@ -655,7 +655,7 @@ static void translate_lean(File *f, int isroot) {
     const char *s = f->data;
     size_t n = strlen(s);
     Buf b = {0}, appendix_tex = {0};
-    int top_heading_seen = 0, appendix_open = 0, appendix_seen = 0;
+    int top_heading_seen = 0, appendix_open = 0;
     for (size_t i = 0; i < n;) {
         size_t next = 0;
         char *appendix_name = NULL;
@@ -670,9 +670,6 @@ static void translate_lean(File *f, int isroot) {
                     die("nested --myne:appendix_start in %s", f->rel);
                     free(appendix_name);
                     break;
-                }
-                if (!appendix_seen++) {
-                    add(&appendix_tex, "\\appendix\n");
                 }
                 add(&appendix_tex, "\\section{");
                 add(&appendix_tex, appendix_name);
@@ -764,8 +761,7 @@ static void translate_lean(File *f, int isroot) {
     if (appendix_open) {
         die("missing --myne:appendix_end in %s", f->rel);
     }
-    add(&b, appendix_tex.s ? appendix_tex.s : "");
-    free(appendix_tex.s);
+    f->appendix_tex = appendix_tex.s;
     f->tex = b.s ? b.s : xstrdup("");
 }
 

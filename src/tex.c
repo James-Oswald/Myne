@@ -8,6 +8,18 @@ static char *tex_name(const char *rel) {
     return p;
 }
 
+static char *appendix_name(const char *rel) {
+    char *name = tex_name(rel);
+    if (ends(name, ".tex")) {
+        name[strlen(name) - 4] = 0;
+    }
+    Buf path = {0};
+    add(&path, name);
+    add(&path, ".myne-appendix.tex");
+    free(name);
+    return path.s;
+}
+
 /* Preserve TeX commands while correcting paths for copied assets and Lean inputs. */
 static char *rewrite_refs(const char *s, const char *source) {
     Buf b = {0};
@@ -186,11 +198,51 @@ static char *remove_root_title(const char *source) {
     return b.s;
 }
 
+static char *insert_appendices(const char *source, const char *appendices) {
+    const char *end = NULL;
+    size_t n = strlen(source);
+    for (size_t i = 0; i < n;) {
+        if (source[i] == '%' && (i == 0 || source[i - 1] != '\\')) {
+            while (i < n && source[i] != '\n') {
+                i++;
+            }
+            continue;
+        }
+        if (!strncmp(source + i, "\\end{document}", strlen("\\end{document}"))) {
+            end = source + i;
+            i += strlen("\\end{document}");
+        } else {
+            i++;
+        }
+    }
+    if (!end) {
+        die("TeX root has no \\end{document} for appendices");
+        return xstrdup(source);
+    }
+    Buf result = {0};
+    addn(&result, source, end - source);
+    add(&result, "\n");
+    add(&result, appendices);
+    add(&result, end);
+    return result.s;
+}
+
 void write_tex(const char *dir) {
     mkdirs(dir);
     int has_boxes = 0;
+    Buf appendices = {0};
     for (int i = 0; i < nfiles; i++) {
         has_boxes |= files[i].has_boxes;
+        if (files[i].appendix_tex && *files[i].appendix_tex) {
+            if (!appendices.n) {
+                add(&appendices, "\\appendix\n");
+            }
+            char *name = appendix_name(files[i].rel);
+            add(&appendices, "\\input{");
+            add(&appendices, name);
+            add(&appendices, "}\n");
+            free(name);
+        }
     }
     for (int i = 0; i < nfiles; i++) {
         File *f = &files[i];
@@ -258,14 +310,31 @@ void write_tex(const char *dir) {
             add(&b, f->lean ? f->tex : f->data);
         }
         char *body = rewrite_refs(b.s, f->rel);
+        int final_root = tex_template_index >= 0 ? i == tex_template_index : i == root_index;
+        if (final_root && appendices.n) {
+            char *complete = insert_appendices(body, appendices.s);
+            free(body);
+            body = complete;
+        }
         if (write_all(path, body, strlen(body))) {
             die("cannot write %s", path);
+        }
+        if (f->appendix_tex && *f->appendix_tex) {
+            char *name = appendix_name(f->rel), *appendix_path = join(dir, name);
+            char *appendix_body = rewrite_refs(f->appendix_tex, f->rel);
+            if (write_all(appendix_path, appendix_body, strlen(appendix_body))) {
+                die("cannot write %s", appendix_path);
+            }
+            free(appendix_body);
+            free(appendix_path);
+            free(name);
         }
         free(body);
         free(b.s);
         free(path);
         free(rel);
     }
+    free(appendices.s);
 }
 
 

@@ -379,10 +379,71 @@ class MyneTests(unittest.TestCase):
             self.assertIn("lean-block theorem", appendix)
             self.assertNotIn("--myne:appendix_", all_html)
             tex = (base / "out/tex/main.tex").read_text()
+            appendix_tex = (base / "out/tex/main.myne-appendix.tex").read_text()
             self.assertLess(tex.index("\\section{After appendix}"), tex.index("\\appendix"))
-            self.assertLess(tex.index("\\appendix"), tex.index("\\section{Supplementary Results}"))
-            self.assertIn("\\begin{theorem}[Appended theorem]", tex)
+            self.assertIn("\\input{main.myne-appendix.tex}", tex)
+            self.assertLess(tex.index("\\appendix"), tex.index("\\end{document}"))
+            self.assertEqual(tex.count("\\appendix"), 1)
+            self.assertIn("\\section{Supplementary Results}", appendix_tex)
+            self.assertIn("\\begin{theorem}[Appended theorem]", appendix_tex)
             self.assertNotIn("--myne:appendix_", tex)
+
+    def test_included_lean_appendix_follows_root_tex_body(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.tex"\nformat = "tex"\n')
+            (base / "main.tex").write_text(
+                "\\documentclass{article}\n\\begin{document}\n"
+                "\\section{Before}\n\\input{part.lean}\n"
+                "\\section{After}\n\\end{document}\n"
+            )
+            (base / "part.lean").write_text(
+                "/-! Main Lean prose. -/\n"
+                "--myne:appendix_start Supplement\n"
+                "/-! Appendix Lean prose. -/\n"
+                "--myne:appendix_end\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            root_tex = (base / "out/tex/main.tex").read_text()
+            main_tex = (base / "out/tex/part.tex").read_text()
+            appendix_tex = (base / "out/tex/part.myne-appendix.tex").read_text()
+            self.assertIn("Main Lean prose.", main_tex)
+            self.assertNotIn("Appendix Lean prose.", main_tex)
+            self.assertIn("\\section{Supplement}", appendix_tex)
+            self.assertIn("Appendix Lean prose.", appendix_tex)
+            self.assertLess(root_tex.index("\\section{After}"), root_tex.index("\\appendix"))
+            self.assertLess(root_tex.index("\\appendix"),
+                            root_tex.index("\\input{part.myne-appendix.tex}"))
+            self.assertLess(root_tex.index("\\input{part.myne-appendix.tex}"),
+                            root_tex.index("\\end{document}"))
+            self.assertEqual(root_tex.count("\\appendix"), 1)
+
+    def test_lean_template_places_appendix_before_document_end(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text(
+                'root = "main.lean"\nformat = "tex"\ntexTemplate = "template.tex"\n'
+            )
+            (base / "template.tex").write_text(
+                "\\documentclass{article}\n{{MYNE_THEOREM_SETUP}}"
+                "\\begin{document}\n{{MYNE_CONTENT}}\n"
+                "\\section{Discussion}\n\\end{document}\n"
+            )
+            (base / "main.lean").write_text(
+                "/-! Main text. -/\n"
+                "--myne:appendix_start Proofs\n"
+                "/-! Appendix proof. -/\n"
+                "--myne:appendix_end\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            template = (base / "out/tex/template.tex").read_text()
+            appendix = (base / "out/tex/main.myne-appendix.tex").read_text()
+            self.assertLess(template.index("\\section{Discussion}"), template.index("\\appendix"))
+            self.assertLess(template.index("\\appendix"), template.index("\\end{document}"))
+            self.assertIn("\\input{main.myne-appendix.tex}", template)
+            self.assertIn("\\section{Proofs}", appendix)
 
     def test_appendix_uses_configured_web_top_level(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

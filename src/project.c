@@ -454,6 +454,7 @@ void clear_project(void) {
         free(files[i].rel);
         free(files[i].data);
         free(files[i].tex);
+        free(files[i].appendix_tex);
         memset(&files[i], 0, sizeof(File));
     }
     for (int i = 0; i < nsegs; i++) {

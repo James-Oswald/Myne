@@ -75,7 +75,7 @@ typedef struct {
 } Buf;
 
 typedef struct {
-    char *rel, *data, *tex;
+    char *rel, *data, *tex, *appendix_tex;
     int lean, state, has_boxes;
     long long stamp;
 } File;
