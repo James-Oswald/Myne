@@ -64,14 +64,24 @@ a { color: #295c9a; }
 .heading-number { font-variant-numeric: tabular-nums; }
 .toc-nav .heading-number { color: #657385; font-weight: 600; }
 .theme-toggle {
+    --switch-width: 2.5rem;
+    --switch-height: 1.375rem;
+    --switch-inset: 0.125rem;
+    --thumb-size: calc(var(--switch-height) - 2 * var(--switch-inset));
+    -webkit-appearance: none;
+    appearance: none;
     position: fixed;
-    right: 1.25rem;
-    bottom: 1.25rem;
+    right: max(1.25rem, env(safe-area-inset-right));
+    bottom: max(1.25rem, env(safe-area-inset-bottom));
     z-index: 20;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     gap: 0.55rem;
+    width: auto;
+    min-width: max-content;
+    min-height: 2.75rem;
+    margin: 0;
     padding: 0.55rem 0.65rem;
     border: 1px solid #b7c4d0;
     border-radius: 0.4rem;
@@ -79,14 +89,19 @@ a { color: #295c9a; }
     color: #20242a;
     cursor: pointer;
     font: 600 0.8rem system-ui, sans-serif;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
     box-shadow: 0 2px 8px #17212b22;
 }
 .theme-toggle:hover { background: #f7f9fb; }
 .theme-toggle:focus-visible { outline: 2px solid #3976b8; outline-offset: 2px; }
 .theme-switch {
     position: relative;
-    flex: 0 0 2.45rem;
-    height: 1.35rem;
+    display: block;
+    flex: 0 0 var(--switch-width);
+    width: var(--switch-width);
+    height: var(--switch-height);
     border: 1px solid #94a3b3;
     border-radius: 999px;
     background: #e8edf2;
@@ -94,20 +109,23 @@ a { color: #295c9a; }
 }
 .theme-thumb {
     position: absolute;
-    top: 0.12rem;
-    left: 0.12rem;
-    width: 1.05rem;
-    height: 1.05rem;
+    top: var(--switch-inset);
+    left: var(--switch-inset);
+    display: block;
+    width: var(--thumb-size);
+    height: var(--thumb-size);
     border-radius: 50%;
     background: #fff;
     box-shadow: 0 1px 3px #17212b55;
     transition: transform 160ms ease;
 }
-.theme-label { color: #667586; }
+.theme-label { display: block; flex: 0 0 auto; color: #667586; }
 :root[data-theme=light] .theme-label:first-child,
 :root[data-theme=dark] .theme-label:last-child { color: inherit; }
 :root[data-theme=dark] .theme-switch { background: #426b99; border-color: #6e8fb3; }
-:root[data-theme=dark] .theme-thumb { transform: translateX(1.1rem); }
+:root[data-theme=dark] .theme-thumb {
+    transform: translateX(calc(var(--switch-width) - var(--thumb-size) - 2 * var(--switch-inset)));
+}
 @media (prefers-reduced-motion: reduce) {
     .theme-switch, .theme-thumb { transition: none; }
 }

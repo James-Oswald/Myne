@@ -803,7 +803,12 @@ assert.deepStrictEqual(mobileHidden(), [false,true,true,true,false]);
             )
             self.assertIn('class=theme-toggle', section)
             self.assertIn("localStorage.getItem('myne-theme')", section)
-            self.assertIn(":root[data-theme=dark]", (html_dir / "style.css").read_text())
+            generated_css = (html_dir / "style.css").read_text()
+            self.assertIn(":root[data-theme=dark]", generated_css)
+            self.assertIn("appearance: none", generated_css)
+            self.assertIn("min-width: max-content", generated_css)
+            self.assertIn("env(safe-area-inset-right)", generated_css)
+            self.assertIn("var(--switch-width) - var(--thumb-size)", generated_css)
             self.assertIn("localStorage.setItem('myne-theme',theme)",
                           (html_dir / "runtime.js").read_text())
 
