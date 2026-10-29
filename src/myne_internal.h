@@ -168,6 +168,7 @@ void die(const char *fmt, ...);
 char *document_pdf_name(void);
 int ends(const char *s, const char *e);
 void escape(Buf *b, const char *s);
+void escape_latex_text(Buf *b, const char *s);
 int file_index(const char *rel);
 const char *finds(const char *s, size_t n, const char *pat);
 unsigned long long fingerprint_dir(const char *rel, int depth);

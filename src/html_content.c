@@ -190,6 +190,23 @@ void escape(Buf *b, const char *s) {
     escape_n(b, s, strlen(s));
 }
 
+/* Escape HTML while translating LaTeX's text quotation marks. */
+void escape_latex_text(Buf *b, const char *s) {
+    size_t n = strlen(s);
+    for (size_t i = 0; i < n;) {
+        if (i + 1 < n && s[i] == '`' && s[i + 1] == '`') {
+            add(b, "&ldquo;");
+            i += 2;
+        } else if (i + 1 < n && s[i] == '\'' && s[i + 1] == '\'') {
+            add(b, "&rdquo;");
+            i += 2;
+        } else {
+            escape_n(b, s + i, 1);
+            i++;
+        }
+    }
+}
+
 static char *slug(int id, const char *kind) {
     char tmp[80];
     snprintf(tmp, sizeof(tmp), "%s-%03d.html", kind, id);
@@ -316,6 +333,16 @@ static void bib_text_html(Buf *b, const char *s) {
         }
         if (s[i] == '{' || s[i] == '}') {
             i++;
+            continue;
+        }
+        if (i + 1 < n && s[i] == '`' && s[i + 1] == '`') {
+            add(b, "&ldquo;");
+            i += 2;
+            continue;
+        }
+        if (i + 1 < n && s[i] == '\'' && s[i + 1] == '\'') {
+            add(b, "&rdquo;");
+            i += 2;
             continue;
         }
         if (s[i] == '\\' && i + 1 < n) {
@@ -618,6 +645,16 @@ static void inline_html(Buf *b, const char *s, size_t n, int depth) {
             i = j;
             continue;
         }
+        if (i + 1 < n && s[i] == '`' && s[i + 1] == '`') {
+            add(b, "&ldquo;");
+            i += 2;
+            continue;
+        }
+        if (i + 1 < n && s[i] == '\'' && s[i + 1] == '\'') {
+            add(b, "&rdquo;");
+            i += 2;
+            continue;
+        }
         escape_n(b, s + i, 1);
         i++;
     }
@@ -753,7 +790,7 @@ static void text_html(const char *s) {
                                     escape(&pages[current].toc, number.s);
                                     add(&pages[current].toc, "</span> ");
                                 }
-                                escape(&pages[current].toc, arg);
+                                escape_latex_text(&pages[current].toc, arg);
                                 add(&pages[current].toc, "</a></li>");
                             } else {
                                 pages[current].toc_count--;
@@ -1010,12 +1047,12 @@ int render_html_document(void) {
                                     !strncasecmp(title, kind, kind_len);
                 if (!default_title) {
                     add(&pages[current].body, "<span class=statement-title> — ");
-                    escape(&pages[current].body, title);
+                    escape_latex_text(&pages[current].body, title);
                     add(&pages[current].body, "</span>");
                 }
                 free(number.s);
             } else {
-                escape(&pages[current].body, title);
+                escape_latex_text(&pages[current].body, title);
             }
             add(&pages[current].body, "</header><div class=\"lean-doc\">");
         } else if (segs[i].kind == SEG_CODE) {

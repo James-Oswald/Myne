@@ -12,7 +12,7 @@ static void nav_html(Buf *b, int active) {
         root_heading = page_heading_level;
     }
     add(b, "<nav class=toc-nav aria-label=\"Table of contents\"><a class=nav-title href=\"index.html\">");
-    escape(b, doc_title ? doc_title : "Myne");
+    escape_latex_text(b, doc_title ? doc_title : "Myne");
     add(b, "</a>");
     for (int i = 0; i < npages; i++) {
         if (!i && npages > 1) {
@@ -47,7 +47,7 @@ static void nav_html(Buf *b, int active) {
             escape(b, pages[i].number);
             add(b, "</span> ");
         }
-        escape(b, pages[i].title);
+        escape_latex_text(b, pages[i].title);
         add(b, "</a>");
     }
     add(b, "</nav>");
@@ -117,7 +117,7 @@ static void page_toc_html(Buf *b, int page) {
             escape(b, pages[j].number);
             add(b, "</span> ");
         }
-        escape(b, pages[j].title);
+        escape_latex_text(b, pages[j].title);
         add(b, "</a></li>");
     }
     add(b, "</ul></nav>");
@@ -126,7 +126,7 @@ static void page_toc_html(Buf *b, int page) {
 
 static void header_html(Buf *b) {
     add(b, "<header class=site-header><a class=site-title href=\"index.html\">");
-    escape(b, doc_title ? doc_title : "Myne");
+    escape_latex_text(b, doc_title ? doc_title : "Myne");
     add(b, "</a><nav class=header-actions aria-label=\"Document actions\">");
     if (!strcmp(format, "both")) {
         char *pdf = document_pdf_name();
@@ -148,7 +148,7 @@ static void dependency_graph_html(const char *dir) {
     add(&html, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta "
                "name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Dependency "
                "Graph — ");
-    escape(&html, doc_title ? doc_title : "Myne");
+    escape_latex_text(&html, doc_title ? doc_title : "Myne");
     add(&html, "</title>");
     if (dark_mode_toggle) {
         add(&html,
@@ -290,9 +290,9 @@ void write_html(const char *dir) {
             escape(&html, pages[i].number);
             ch(&html, ' ');
         }
-        escape(&html, pages[i].title);
+        escape_latex_text(&html, pages[i].title);
         add(&html, " — ");
-        escape(&html, doc_title ? doc_title : "Myne");
+        escape_latex_text(&html, doc_title ? doc_title : "Myne");
         add(&html, "</title>");
         if (dark_mode_toggle) {
             add(&html,
@@ -319,7 +319,7 @@ void write_html(const char *dir) {
             escape(&html, pages[i].number);
             add(&html, "</span> ");
         }
-        escape(&html, pages[i].title);
+        escape_latex_text(&html, pages[i].title);
         add(&html, "</h1>");
         if (i == 0 && pages[0].byline.n) {
             addn(&html, pages[0].byline.s, pages[0].byline.n);
@@ -336,7 +336,7 @@ void write_html(const char *dir) {
                     escape(&html, pages[j].number);
                     add(&html, "</span> ");
                 }
-                escape(&html, pages[j].title);
+                escape_latex_text(&html, pages[j].title);
                 add(&html, "</a></li>");
             }
             add(&html, "</ul>");
@@ -350,7 +350,7 @@ void write_html(const char *dir) {
                 add(&html, "<li><a href=\"");
                 escape(&html, pages[j].slug);
                 add(&html, "\">");
-                escape(&html, pages[j].title);
+                escape_latex_text(&html, pages[j].title);
                 add(&html, "</a></li>");
             }
             add(&html, "</ul>");
@@ -371,4 +371,3 @@ void write_html(const char *dir) {
     }
     dependency_graph_html(dir);
 }
-

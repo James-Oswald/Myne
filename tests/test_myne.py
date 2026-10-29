@@ -20,6 +20,35 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 class MyneTests(unittest.TestCase):
+    def test_latex_quotation_marks_render_on_web(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.tex"\nformat = "both"\n')
+            source = (
+                "\\documentclass{article}\n"
+                "\\title{A ``Quoted'' Title}\n"
+                "\\begin{document}\n"
+                "\\section{``Opening''}\n"
+                "``Outer \\textit{inner}'' and author's apostrophe; math $x''$.\n"
+                "\\end{document}\n"
+            )
+            (base / "main.tex").write_text(source)
+
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            title = (base / "out/html/index.html").read_text()
+            section = (base / "out/html/section-001.html").read_text()
+            generated_tex = (base / "out/tex/main.tex").read_text()
+
+            self.assertIn("A &ldquo;Quoted&rdquo; Title", title)
+            self.assertIn("&ldquo;Opening&rdquo;", title)
+            self.assertIn("<h1><span class=heading-number>1</span> &ldquo;Opening&rdquo;</h1>", section)
+            self.assertIn("&ldquo;Outer <em>inner</em>&rdquo;", section)
+            self.assertIn("author's apostrophe", section)
+            self.assertIn("<span class=math>$x''$</span>", section)
+            self.assertIn("A ``Quoted'' Title", generated_tex)
+            self.assertIn("``Outer \\textit{inner}''", generated_tex)
+
     def test_references_page_precedes_appendices(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
