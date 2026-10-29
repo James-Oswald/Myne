@@ -107,7 +107,7 @@ typedef struct {
 } LeanDependencyDecl;
 
 typedef struct {
-    char *key, *author, *title, *year, *url, *doi;
+    char *key, *author, *title, *editor, *venue, *year, *url, *doi;
     int number;
 } Bib;
 
@@ -144,6 +144,7 @@ extern char *root, *format, *style, *tex_template, *tex_class, *page_heading, *b
 extern int nbibcfg;
 extern int live, port, failed, root_index, tex_template_index, tex_class_index;
 extern int dark_mode_toggle, page_heading_level, web_table_of_contents;
+extern int web_reference_publication_venue, web_reference_editors;
 extern int chapter_number, section_number, subsection_number, subsubsection_number;
 extern int chapter_active, statement_number;
 extern char statement_scope[64];

@@ -23,6 +23,7 @@ char *root, *format, *style, *tex_template, *tex_class, *page_heading, *bibcfg[6
 int nbibcfg;
 int live, port = 8000, failed, root_index, tex_template_index = -1, tex_class_index = -1;
 int dark_mode_toggle = 1, page_heading_level, web_table_of_contents = 1;
+int web_reference_publication_venue = 1, web_reference_editors = 1;
 int chapter_number, section_number, subsection_number, subsubsection_number;
 int chapter_active, statement_number;
 char statement_scope[64];

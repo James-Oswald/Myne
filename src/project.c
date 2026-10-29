@@ -506,6 +506,8 @@ void clear_project(void) {
         free(bibs[i].key);
         free(bibs[i].author);
         free(bibs[i].title);
+        free(bibs[i].editor);
+        free(bibs[i].venue);
         free(bibs[i].year);
         free(bibs[i].url);
         free(bibs[i].doi);
@@ -623,6 +625,14 @@ void load_config(const char *path) {
             if (!config_bool(value, &web_table_of_contents)) {
                 die("tableOfContents must be true or false");
             }
+        } else if (!strcmp(key, "publicationVenue")) {
+            if (!config_bool(value, &web_reference_publication_venue)) {
+                die("publicationVenue must be true or false");
+            }
+        } else if (!strcmp(key, "editors")) {
+            if (!config_bool(value, &web_reference_editors)) {
+                die("editors must be true or false");
+            }
         } else if (!strcmp(key, "pageHeading")) {
             page_heading = unquote(value);
         } else if (!strcmp(key, "dependencyGraph")) {
@@ -660,4 +670,3 @@ void load_config(const char *path) {
     }
     free(data);
 }
-

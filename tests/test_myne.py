@@ -215,6 +215,45 @@ class MyneTests(unittest.TestCase):
             self.assertIn('href="#ref-alpha"', single_page)
             self.assertFalse((html_dir / "references.html").exists())
 
+    def test_web_reference_venue_and_editor_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            config = base / "myne.toml"
+            config.write_text(
+                'root = "main.tex"\nformat = "html"\nbibliography = "refs.bib"\n'
+            )
+            (base / "main.tex").write_text(
+                r"\title{References}\section{Sources}\cite{article,chapter,direct}" "\n"
+            )
+            (base / "refs.bib").write_text(
+                "@article{article, author={A. Author}, title={Article}, "
+                "editor={E. Editor}, journal={Journal of Tests}, year={2026}}\n"
+                "@incollection{chapter, author={B. Author}, title={Chapter}, "
+                "booktitle={Collected Tests}, year={2025}}\n"
+                "@misc{direct, author={C. Author}, title={Report}, "
+                "venue={Test Archive}, publisher={Ignored Publisher}, year={2024}}\n"
+            )
+
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            references = (base / "out/html/references.html").read_text()
+            self.assertIn("Article</i>. Edited by E. Editor. Journal of Tests (2026)", references)
+            self.assertIn("Chapter</i>. Collected Tests (2025)", references)
+            self.assertIn("Report</i>. Test Archive (2024)", references)
+            self.assertNotIn("Ignored Publisher", references)
+
+            config.write_text(
+                'root = "main.tex"\nformat = "html"\nbibliography = "refs.bib"\n'
+                '[web]\npublicationVenue = false\neditors = false\n'
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            references = (base / "out/html/references.html").read_text()
+            self.assertNotIn("E. Editor", references)
+            self.assertNotIn("Journal of Tests", references)
+            self.assertNotIn("Collected Tests", references)
+            self.assertNotIn("Test Archive", references)
+
     @unittest.skipUnless(shutil.which("node"), "Node.js is required")
     def test_repeated_margin_notes_use_visual_distance(self) -> None:
         script = r"""

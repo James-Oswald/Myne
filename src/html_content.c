@@ -112,6 +112,20 @@ static void parse_bib(const char *rel) {
             b->key = key;
             b->author = field(entry, "author");
             b->title = field(entry, "title");
+            b->editor = field(entry, "editor");
+            b->venue = field(entry, "venue");
+            if (!*b->venue) {
+                free(b->venue);
+                b->venue = field(entry, "journal");
+            }
+            if (!*b->venue) {
+                free(b->venue);
+                b->venue = field(entry, "booktitle");
+            }
+            if (!*b->venue) {
+                free(b->venue);
+                b->venue = field(entry, "publisher");
+            }
             b->year = field(entry, "year");
             b->url = field(entry, "url");
             b->doi = field(entry, "doi");
@@ -421,6 +435,14 @@ static void bib_reference_html(Buf *b, const Bib *entry, const char *separator) 
     bib_text_html(b, entry->author);
     add(b, separator);
     bib_title_html(b, entry);
+    if (web_reference_editors && *entry->editor) {
+        add(b, ". Edited by ");
+        bib_text_html(b, entry->editor);
+    }
+    if (web_reference_publication_venue && *entry->venue) {
+        add(b, ". ");
+        bib_text_html(b, entry->venue);
+    }
     add(b, " (");
     bib_text_html(b, entry->year);
     add(b, ")");
