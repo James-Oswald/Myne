@@ -431,16 +431,82 @@ static void bib_title_html(Buf *b, const Bib *entry) {
     free(doi_url.s);
 }
 
+static int bib_name_separator(const char *s, size_t n, size_t i) {
+    return i + 3 <= n && !strncasecmp(s + i, "and", 3) &&
+           (i == 0 || isspace((unsigned char)s[i - 1])) &&
+           (i + 3 == n || isspace((unsigned char)s[i + 3]));
+}
+
+static int bib_people_count(const char *s) {
+    size_t n = strlen(s);
+    int depth = 0, count = *s ? 1 : 0;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == '{') depth++;
+        else if (s[i] == '}' && depth) depth--;
+        else if (!depth && bib_name_separator(s, n, i)) {
+            count++;
+            i += 2;
+        }
+    }
+    return count;
+}
+
+/* BibTeX separates people with top-level "and" tokens. */
+static int bib_people_html(Buf *b, const char *s) {
+    size_t n = strlen(s), start = 0;
+    int depth = 0, count = bib_people_count(s);
+    if (count <= web_reference_et_al_after) {
+        bib_text_html(b, s);
+        return 0;
+    }
+    depth = 0;
+    int shown = 0;
+    for (size_t i = 0; i <= n && shown < web_reference_et_al_after; i++) {
+        if (i < n && s[i] == '{') depth++;
+        else if (i < n && s[i] == '}' && depth) depth--;
+        if (i == n || (!depth && bib_name_separator(s, n, i))) {
+            size_t end = i;
+            while (start < end && isspace((unsigned char)s[start])) start++;
+            while (end > start && isspace((unsigned char)s[end - 1])) end--;
+            if (shown) add(b, ", ");
+            char *person = slice(s + start, end - start);
+            bib_text_html(b, person);
+            free(person);
+            shown++;
+            i += i < n ? 2 : 0;
+            start = i + 1;
+        }
+    }
+    add(b, shown > 1 ? ", et al." : " et al.");
+    return 1;
+}
+
 static void bib_reference_html(Buf *b, const Bib *entry, const char *separator) {
-    bib_text_html(b, entry->author);
-    add(b, separator);
+    int has_authors = *entry->author != 0;
+    int editor_as_author = !has_authors && web_reference_editors && *entry->editor;
+    int abbreviated_people = 0;
+    if (has_authors) {
+        abbreviated_people = bib_people_html(b, entry->author);
+    } else if (editor_as_author) {
+        abbreviated_people = bib_people_html(b, entry->editor);
+        add(b, " (ed");
+        if (bib_people_count(entry->editor) > 1) {
+            ch(b, 's');
+        }
+        add(b, ".)");
+    }
+    if (has_authors || editor_as_author) {
+        add(b, abbreviated_people && *separator == '.' ? separator + 1 : separator);
+    }
     bib_title_html(b, entry);
-    if (web_reference_editors && *entry->editor) {
+    int abbreviated_editors = 0;
+    if (web_reference_editors && *entry->editor && !editor_as_author &&
+        (!web_reference_editors_only_without_authors || !has_authors)) {
         add(b, ". Edited by ");
-        bib_text_html(b, entry->editor);
+        abbreviated_editors = bib_people_html(b, entry->editor);
     }
     if (web_reference_publication_venue && *entry->venue) {
-        add(b, ". ");
+        add(b, abbreviated_editors ? " " : ". ");
         bib_text_html(b, entry->venue);
     }
     add(b, " (");
@@ -479,7 +545,9 @@ static void cite_group_html(Buf *b, char *keys, int textual) {
     if (textual) {
         for (int i = 0; i < count; i++) {
             if (i) add(b, "; ");
-            bib_text_html(b, entries[i]->author);
+            const char *people = *entries[i]->author ? entries[i]->author
+                                 : web_reference_editors ? entries[i]->editor : "";
+            bib_people_html(b, people);
             add(b, " (");
             bib_text_html(b, entries[i]->year);
             add(b, ")");

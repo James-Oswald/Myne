@@ -145,6 +145,8 @@ extern int nbibcfg;
 extern int live, port, failed, root_index, tex_template_index, tex_class_index;
 extern int dark_mode_toggle, page_heading_level, web_table_of_contents;
 extern int web_reference_publication_venue, web_reference_editors;
+extern int web_reference_editors_only_without_authors;
+extern int web_reference_et_al_after;
 extern int chapter_number, section_number, subsection_number, subsubsection_number;
 extern int chapter_active, statement_number;
 extern char statement_scope[64];

@@ -226,25 +226,28 @@ class MyneTests(unittest.TestCase):
                 r"\title{References}\section{Sources}\cite{article,chapter,direct}" "\n"
             )
             (base / "refs.bib").write_text(
-                "@article{article, author={A. Author}, title={Article}, "
-                "editor={E. Editor}, journal={Journal of Tests}, year={2026}}\n"
+                "@article{article, author={A. Author and B. Author and C. Author}, title={Article}, "
+                "editor={E. Editor and F. Editor and G. Editor}, journal={Journal of Tests}, year={2026}}\n"
                 "@incollection{chapter, author={B. Author}, title={Chapter}, "
                 "booktitle={Collected Tests}, year={2025}}\n"
-                "@misc{direct, author={C. Author}, title={Report}, "
+                "@misc{direct, editor={H. Editor and I. Editor and J. Editor}, title={Report}, "
                 "venue={Test Archive}, publisher={Ignored Publisher}, year={2024}}\n"
             )
 
             result = run(cwd=base)
             self.assertEqual(result.returncode, 0, result.stderr)
             references = (base / "out/html/references.html").read_text()
-            self.assertIn("Article</i>. Edited by E. Editor. Journal of Tests (2026)", references)
+            self.assertIn(
+                "A. Author, B. Author, et al. <i>Article</i>. Journal of Tests (2026)", references,
+            )
+            self.assertNotIn("E. Editor", references)
             self.assertIn("Chapter</i>. Collected Tests (2025)", references)
-            self.assertIn("Report</i>. Test Archive (2024)", references)
+            self.assertIn("H. Editor, I. Editor, et al. (eds.) <i>Report</i>. Test Archive (2024)", references)
             self.assertNotIn("Ignored Publisher", references)
 
             config.write_text(
                 'root = "main.tex"\nformat = "html"\nbibliography = "refs.bib"\n'
-                '[web]\npublicationVenue = false\neditors = false\n'
+                '[web.references]\npublicationVenue = false\neditors = false\netAlAfter = 1\n'
             )
             result = run(cwd=base)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -253,6 +256,16 @@ class MyneTests(unittest.TestCase):
             self.assertNotIn("Journal of Tests", references)
             self.assertNotIn("Collected Tests", references)
             self.assertNotIn("Test Archive", references)
+            self.assertIn("A. Author et al. <i>Article</i>", references)
+
+            config.write_text(
+                'root = "main.tex"\nformat = "html"\nbibliography = "refs.bib"\n'
+                '[web.references]\neditorsOnlyWithoutAuthors = false\n'
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            references = (base / "out/html/references.html").read_text()
+            self.assertIn("Article</i>. Edited by E. Editor, F. Editor, et al.", references)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required")
     def test_repeated_margin_notes_use_visual_distance(self) -> None:

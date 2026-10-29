@@ -141,6 +141,21 @@ static int config_bool(const char *value, int *result) {
     return valid;
 }
 
+static int config_positive_int(const char *value, int *result) {
+    char *v = unquote(value), *end = NULL;
+    errno = 0;
+    long parsed = strtol(v, &end, 10);
+    while (end && isspace((unsigned char)*end)) {
+        end++;
+    }
+    int valid = !errno && end && end != v && !*end && parsed > 0 && parsed <= INT_MAX;
+    if (valid) {
+        *result = (int)parsed;
+    }
+    free(v);
+    return valid;
+}
+
 int mkdirs(const char *path) {
     char *s = xstrdup(path);
     for (char *p = s + 1; *p; p++) {
@@ -551,7 +566,8 @@ void load_config(const char *path) {
     if (!data) {
         return;
     }
-    enum { CONFIG_MAIN, CONFIG_COMMAND_MAP, CONFIG_DECLARATION_MAP } table = CONFIG_MAIN;
+    enum { CONFIG_MAIN, CONFIG_COMMAND_MAP, CONFIG_DECLARATION_MAP,
+           CONFIG_WEB_REFERENCES } table = CONFIG_MAIN;
     for (char *line = strtok(data, "\n"); line; line = strtok(NULL, "\n")) {
         char *p = trim(line);
         if (!*p || *p == '#') {
@@ -560,6 +576,7 @@ void load_config(const char *path) {
         if (*p == '[') {
             table = !strcmp(p, "[commandMap]") ? CONFIG_COMMAND_MAP
                     : !strcmp(p, "[declarationMap]") ? CONFIG_DECLARATION_MAP
+                    : !strcmp(p, "[web.references]") ? CONFIG_WEB_REFERENCES
                     : CONFIG_MAIN;
             continue;
         }
@@ -607,6 +624,26 @@ void load_config(const char *path) {
             free(to);
             continue;
         }
+        if (table == CONFIG_WEB_REFERENCES) {
+            if (!strcmp(key, "publicationVenue")) {
+                if (!config_bool(value, &web_reference_publication_venue)) {
+                    die("web.references.publicationVenue must be true or false");
+                }
+            } else if (!strcmp(key, "editors")) {
+                if (!config_bool(value, &web_reference_editors)) {
+                    die("web.references.editors must be true or false");
+                }
+            } else if (!strcmp(key, "editorsOnlyWithoutAuthors")) {
+                if (!config_bool(value, &web_reference_editors_only_without_authors)) {
+                    die("web.references.editorsOnlyWithoutAuthors must be true or false");
+                }
+            } else if (!strcmp(key, "etAlAfter")) {
+                if (!config_positive_int(value, &web_reference_et_al_after)) {
+                    die("web.references.etAlAfter must be a positive integer");
+                }
+            }
+            continue;
+        }
         if (!strcmp(key, "root")) {
             root = unquote(value);
         } else if (!strcmp(key, "format")) {
@@ -624,14 +661,6 @@ void load_config(const char *path) {
         } else if (!strcmp(key, "tableOfContents")) {
             if (!config_bool(value, &web_table_of_contents)) {
                 die("tableOfContents must be true or false");
-            }
-        } else if (!strcmp(key, "publicationVenue")) {
-            if (!config_bool(value, &web_reference_publication_venue)) {
-                die("publicationVenue must be true or false");
-            }
-        } else if (!strcmp(key, "editors")) {
-            if (!config_bool(value, &web_reference_editors)) {
-                die("editors must be true or false");
             }
         } else if (!strcmp(key, "pageHeading")) {
             page_heading = unquote(value);
