@@ -39,9 +39,9 @@ static void report_latex_errors(const char *run_log) {
             fprintf(stderr, "  %s", line);
             context = line[0] == '!' || latex_source_error_line(line) ? 4 : 0;
         } else if (context > 0) {
+            fprintf(stderr, "  %s", line);
             context--;
-            if ((line[0] == 'l' && line[1] == '.') || line[0] == '<') {
-                fprintf(stderr, "  %s", line);
+            if (line[0] == 'l' && line[1] == '.') {
                 context = 0;
             }
         }

@@ -124,7 +124,21 @@ static void page_toc_html(Buf *b, int page) {
 }
 
 
-static void header_html(Buf *b) {
+static int has_lean_code(void) {
+    for (int i = 0; i < nsegs; i++) {
+        if (segs[i].kind == SEG_CODE) {
+            return 1;
+        }
+    }
+    for (int i = 0; i < nappendix_segs; i++) {
+        if (appendix_segs[i].kind == SEG_CODE) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void header_html(Buf *b, int show_code_toggle) {
     add(b, "<header class=site-header><a class=site-title href=\"index.html\">");
     escape_latex_text(b, doc_title ? doc_title : "Myne");
     add(b, "</a><nav class=header-actions aria-label=\"Document actions\">");
@@ -137,6 +151,10 @@ static void header_html(Buf *b) {
     }
     if (ndependency_nodes) {
         add(b, "<a class=header-action href=\"dependencies.html\">Dependency graph</a>");
+    }
+    if (show_code_toggle && has_lean_code()) {
+        add(b, "<button class=\"header-action code-visibility-toggle\" type=button "
+               "aria-pressed=\"false\">Hide Lean code</button>");
     }
     add(b, "</nav></header>");
 }
@@ -166,7 +184,7 @@ static void dependency_graph_html(const char *dir) {
     add(&html, "</head><body data-graph-page data-style=\"");
     escape(&html, ends(style, ".css") ? "custom" : style);
     add(&html, "\">");
-    header_html(&html);
+    header_html(&html, 0);
     theme_toggle_html(&html);
     add(&html, "<main class=dependency-page><h1>Dependency graph</h1>");
     if (elaborated_dependency_graph) {
@@ -300,6 +318,10 @@ void write_html(const char *dir) {
                 "t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';"
                 "document.documentElement.dataset.theme=t}catch(_){}</script>");
         }
+        if (has_lean_code()) {
+            add(&html, "<script>try{if(localStorage.getItem('myne-hide-lean')==='true')"
+                       "document.documentElement.dataset.hideLean='true'}catch(_){}</script>");
+        }
         add(&html, "<link rel=\"stylesheet\" href=\"style.css\"><link rel=\"stylesheet\" "
                    "href=\"katex/katex.min.css\">");
         if (custom) {
@@ -310,7 +332,7 @@ void write_html(const char *dir) {
                    "src=\"runtime.js\"></script></head><body data-style=\"");
         escape(&html, custom ? "custom" : style);
         add(&html, live ? "\" data-live=\"1\">" : "\" data-live=\"0\">");
-        header_html(&html);
+        header_html(&html, 1);
         nav_html(&html, i);
         theme_toggle_html(&html);
         add(&html, "<main><h1>");

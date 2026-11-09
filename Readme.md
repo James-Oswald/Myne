@@ -87,7 +87,7 @@ The generated directory can also be passed to another host's upload or deploy ac
 
 The [Myne KaTeX Preview extension](vscode-extension/README.md) opens a live side preview for Lean, Markdown, and LaTeX files. It renders inline and display math with KaTeX and works offline. To package it as a VSIX, run `npm run prepare-assets` from `vscode-extension/` to build the browser assets from the KaTeX submodule, then run `vsce package` there. Generated packaging assets are Git-ignored.
 
-For a Lean `/-- ... -/` comment attached to a `def`, `lemma`, or `theorem`, HTML places the comment and highlighted declaration inside one box. TeX emits the comment in an AMS `definition`, `lemma`, or `theorem` environment and omits the Lean source. Module comments (`/-! ... -/`) remain document prose.
+For a Lean `/-- ... -/` comment attached to a `def`, `lemma`, `theorem`, or `instance`, HTML places the comment and highlighted declaration inside one box. Instances are treated as theorems by default. TeX emits the comment in an AMS `definition`, `lemma`, or `theorem` environment and omits the Lean source. Module comments (`/-! ... -/`) remain document prose.
 
 When generating TeX from Lean documentation, Myne translates common Unicode math symbols inside `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` into LaTeX commands. This includes Greek letters, operators, relations, arrows, set symbols, and common superscripts and subscripts; Unicode outside math delimiters is preserved.
 

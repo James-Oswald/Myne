@@ -1,10 +1,10 @@
 #include "myne_internal.h"
 
 int keyword(const char *s, size_t n) {
-    const char *kw[] = {"def",  "theorem", "lemma",     "by",        "import",  "namespace",
-                        "end",  "where",   "inductive", "structure", "example", "variable",
-                        "open", "simp",    "have",      "let",       "match",   "with",
-                        "fun",  "if",      "then",      "else"};
+    const char *kw[] = {"def",      "theorem", "lemma",     "instance", "by",       "import",
+                        "namespace", "end",     "where",     "inductive", "structure", "example",
+                        "variable", "open",    "simp",      "have",      "let",       "match",
+                        "with",     "fun",     "if",        "then",      "else"};
     for (size_t i = 0; i < sizeof(kw) / sizeof(*kw); i++) {
         if (strlen(kw[i]) == n && !strncmp(s, kw[i], n)) {
             return 1;
@@ -41,7 +41,8 @@ static int dependency_declaration(const char *s, size_t begin, size_t end, size_
         size_t word = p;
         while (p < end && (isalpha((unsigned char)s[p]) || s[p] == '_')) p++;
         size_t word_len = p - word;
-        const char *modifiers[] = {"private", "protected", "noncomputable", "partial", "unsafe"};
+        const char *modifiers[] = {"private", "protected", "noncomputable", "partial", "unsafe",
+                                   "local", "scoped"};
         int modifier = 0;
         for (size_t i = 0; i < sizeof(modifiers) / sizeof(*modifiers); i++) {
             if (word_len == strlen(modifiers[i]) && !memcmp(s + word, modifiers[i], word_len)) {
@@ -68,6 +69,7 @@ static int dependency_declaration(const char *s, size_t begin, size_t end, size_
     }
     if ((cmd_len == 5 && !memcmp(s + cmd, "lemma", 5))) declaration_kind = LEAN_LEMMA;
     if ((cmd_len == 7 && !memcmp(s + cmd, "theorem", 7))) declaration_kind = LEAN_THEOREM;
+    if ((cmd_len == 8 && !memcmp(s + cmd, "instance", 8))) declaration_kind = LEAN_THEOREM;
     if (declaration_kind == LEAN_CODE || (p < end && !isspace((unsigned char)s[p]))) {
         return 0;
     }

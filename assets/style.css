@@ -24,15 +24,21 @@ a { color: #295c9a; }
 }
 .site-title { color: inherit; font-weight: 700; text-decoration: none; }
 .header-actions { display: flex; align-items: center; gap: 0.6rem; }
-.header-actions a {
+.header-actions a, .header-actions button {
     display: inline-block;
     padding: 0.35rem 0.7rem;
     border: 1px solid #b7c4d0;
     border-radius: 0.4rem;
     text-decoration: none;
     font-weight: 600;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    color: inherit;
+    background: #fff;
+    cursor: pointer;
 }
-.header-actions a:hover { background: #f7f9fb; }
+.header-actions a:hover, .header-actions button:hover { background: #f7f9fb; }
 
 .toc-nav {
     position: fixed;
@@ -179,6 +185,26 @@ pre {
 
 .lean-block.theorem, .lean-block.lemma { border-left: 4px solid #8b4050; }
 .lean-block.def { border-left: 4px solid #397356; }
+body[data-style=plain] .lean-block.def {
+    background: #e5f4ff;
+    border-color: #0284c7;
+}
+body[data-style=plain] .lean-block.def header {
+    background: #cbeaff;
+    border-color: #7dd3fc;
+    color: #075985;
+}
+body[data-style=plain] .lean-block.theorem,
+body[data-style=plain] .lean-block.lemma {
+    background: #fff0f3;
+    border-color: #e11d48;
+}
+body[data-style=plain] .lean-block.theorem header,
+body[data-style=plain] .lean-block.lemma header {
+    background: #ffd6e0;
+    border-color: #fda4af;
+    color: #9f1239;
+}
 .kw { color: #8051aa; font-weight: 700; }
 .str { color: #a15531; }
 .num { color: #2c6d9a; }
@@ -298,6 +324,12 @@ body[data-style=hutter] .lean-code { background: transparent; }
     background: #192028;
     border-color: #34404d;
 }
+:root[data-theme=dark] .header-actions button {
+    color: #e5e9ef;
+    background: #252e38;
+    border-color: #465465;
+}
+:root[data-theme=dark] .header-actions button:hover { background: #303b47; }
 :root[data-theme=dark] .toc-nav {
     background: #192028;
     border-color: #34404d;
@@ -341,6 +373,27 @@ body[data-style=hutter] .lean-code { background: transparent; }
 :root[data-theme=dark] body[data-style=verso] .lean-code {
     background: #151b21;
     border-color: #394653;
+}
+:root[data-hide-lean=true] .lean-code { display: none !important; }
+:root[data-theme=dark] body[data-style=plain] .lean-block.def {
+    background: #112a3a;
+    border-color: #38bdf8;
+}
+:root[data-theme=dark] body[data-style=plain] .lean-block.def header {
+    background: #163b52;
+    border-color: #256385;
+    color: #bae6fd;
+}
+:root[data-theme=dark] body[data-style=plain] .lean-block.theorem,
+:root[data-theme=dark] body[data-style=plain] .lean-block.lemma {
+    background: #351c2a;
+    border-color: #fb7185;
+}
+:root[data-theme=dark] body[data-style=plain] .lean-block.theorem header,
+:root[data-theme=dark] body[data-style=plain] .lean-block.lemma header {
+    background: #4a2437;
+    border-color: #8a3652;
+    color: #fecdd3;
 }
 :root[data-theme=dark] body[data-style=hutter] .lean-block.def {
     background: #14251a;

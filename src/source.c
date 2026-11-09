@@ -6,7 +6,8 @@ static pthread_mutex_t translation_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Identify the declaration immediately following a Lean doc comment. */
 static int lean_kind(const char *s, size_t n) {
     size_t i = 0;
-    const char *modifiers[] = {"private", "protected", "noncomputable", "partial", "unsafe"};
+    const char *modifiers[] = {"private", "protected", "noncomputable", "partial", "unsafe",
+                               "local", "scoped"};
     for (;;) {
         while (i < n && isspace((unsigned char)s[i])) {
             i++;
@@ -60,6 +61,10 @@ static int lean_kind(const char *s, size_t n) {
     }
     if (longest) {
         return mapped;
+    }
+    if (i + 8 <= n && !memcmp(s + i, "instance", 8) &&
+        (i + 8 == n || isspace((unsigned char)s[i + 8]))) {
+        return LEAN_THEOREM;
     }
     const char *definitions[] = {"def", "abbrev", "opaque", "structure", "class", "inductive"};
     for (size_t j = 0; j < sizeof(definitions) / sizeof(*definitions); j++) {
@@ -647,6 +652,7 @@ static const TexMathSymbol tex_math_symbols[] = {
     {"∪", "\\cup"}, {"∩", "\\cap"}, {"∖", "\\setminus"}, {"∅", "\\emptyset"},
     {"℘", "\\wp"}, {"ℵ", "\\aleph"}, {"ℶ", "\\beth"},
     {"ℏ", "\\hbar"}, {"ℑ", "\\Im"}, {"ℜ", "\\Re"},
+    {"ℒ", "\\mathcal{L}"},
     {"ℕ", "\\mathbb{N}"}, {"ℤ", "\\mathbb{Z}"}, {"ℚ", "\\mathbb{Q}"},
     {"ℝ", "\\mathbb{R}"}, {"ℂ", "\\mathbb{C}"}, {"ℙ", "\\mathbb{P}"},
     {"≤", "\\leq"}, {"≥", "\\geq"}, {"≠", "\\neq"}, {"≈", "\\approx"},
@@ -659,6 +665,7 @@ static const TexMathSymbol tex_math_symbols[] = {
     {"≔", "\\mathrel{:=}"}, {"≕", "\\mathrel{=:}"}, {"∝", "\\propto"},
     {"≪", "\\ll"}, {"≫", "\\gg"}, {"≺", "\\prec"}, {"≻", "\\succ"},
     {"≼", "\\preceq"}, {"≽", "\\succeq"}, {"⊢", "\\vdash"},
+    {"▸", "\\triangleright"},
     {"⊣", "\\dashv"}, {"⊨", "\\models"}, {"⊩", "\\Vdash"},
     {"←", "\\leftarrow"}, {"→", "\\rightarrow"}, {"↔", "\\leftrightarrow"},
     {"⇐", "\\Leftarrow"}, {"⇒", "\\Rightarrow"}, {"⇔", "\\Leftrightarrow"},
@@ -683,7 +690,9 @@ static const TexMathSymbol tex_math_symbols[] = {
     {"⋉", "\\ltimes"},
     {"⋊", "\\rtimes"}, {"⊓", "\\sqcap"}, {"⊔", "\\sqcup"}, {"⌊", "\\lfloor"},
     {"⌋", "\\rfloor"}, {"⌈", "\\lceil"}, {"⌉", "\\rceil"},
-    {"⟨", "\\langle"}, {"⟩", "\\rangle"}, {"…", "\\ldots"}, {"⋯", "\\cdots"},
+    {"⟨", "\\langle"}, {"⟩", "\\rangle"},
+    {"⟪", "\\langle\\!\\langle"}, {"⟫", "\\rangle\\!\\rangle"},
+    {"…", "\\ldots"}, {"⋯", "\\cdots"},
     {"⋮", "\\vdots"}, {"⋱", "\\ddots"}, {"′", "\\prime"}, {"″", "\\prime\\prime"},
     {"−", "-"}, {"⁄", "/"}, {" ", "~"},
     {"⁰", "^{0}"}, {"¹", "^{1}"}, {"²", "^{2}"}, {"³", "^{3}"},
@@ -708,8 +717,48 @@ static int tex_is_escaped(const char *s, size_t i) {
     return slashes % 2;
 }
 
+static void tex_inline_code(Buf *b, const char *s, size_t n) {
+    add(b, "\\texttt{");
+    for (size_t i = 0; i < n; i++) {
+        switch (s[i]) {
+        case '\\': add(b, "\\textbackslash{}"); break;
+        case '{': add(b, "\\{"); break;
+        case '}': add(b, "\\}"); break;
+        case '$': add(b, "\\$"); break;
+        case '&': add(b, "\\&"); break;
+        case '%': add(b, "\\%"); break;
+        case '#': add(b, "\\#"); break;
+        case '_': add(b, "\\_"); break;
+        case '^': add(b, "\\textasciicircum{}"); break;
+        case '~': add(b, "\\textasciitilde{}"); break;
+        default: ch(b, s[i]); break;
+        }
+    }
+    ch(b, '}');
+}
+
 static void tex_math_text(Buf *b, const char *s, size_t n, int *math_mode) {
     for (size_t i = 0; i < n;) {
+        if (!*math_mode && s[i] == '`') {
+            size_t ticks = 1;
+            while (i + ticks < n && s[i + ticks] == '`') ticks++;
+            size_t close = i + ticks;
+            while (close < n) {
+                if (s[close] == '`') {
+                    size_t run = 1;
+                    while (close + run < n && s[close + run] == '`') run++;
+                    if (run == ticks) break;
+                    close += run;
+                } else {
+                    close++;
+                }
+            }
+            if (close < n) {
+                tex_inline_code(b, s + i + ticks, close - i - ticks);
+                i = close + ticks;
+                continue;
+            }
+        }
         if (s[i] == '$' && !tex_is_escaped(s, i)) {
             int delimiter = i + 1 < n && s[i + 1] == '$' ? 2 : 1;
             if (!*math_mode) {
@@ -741,15 +790,28 @@ static void tex_math_text(Buf *b, const char *s, size_t n, int *math_mode) {
             i += 2;
             continue;
         }
-        if (*math_mode) {
+        {
             int replaced = 0;
             for (size_t j = 0; j < sizeof(tex_math_symbols) / sizeof(*tex_math_symbols); j++) {
                 size_t len = strlen(tex_math_symbols[j].unicode);
                 if (i + len <= n && !memcmp(s + i, tex_math_symbols[j].unicode, len)) {
-                    add(b, tex_math_symbols[j].latex);
-                    size_t latex_len = strlen(tex_math_symbols[j].latex);
+                    const char *latex = tex_math_symbols[j].latex;
+                    if (!*math_mode && latex[0] == '_') {
+                        add(b, "\\textsubscript{");
+                        addn(b, latex + 2, strlen(latex) - 3);
+                        ch(b, '}');
+                    } else if (!*math_mode && latex[0] == '^') {
+                        add(b, "\\textsuperscript{");
+                        addn(b, latex + 2, strlen(latex) - 3);
+                        ch(b, '}');
+                    } else {
+                        if (!*math_mode) add(b, "\\ensuremath{");
+                        add(b, latex);
+                        if (!*math_mode) ch(b, '}');
+                    }
+                    size_t latex_len = strlen(latex);
                     if (i + len < n && isalpha((unsigned char)s[i + len]) &&
-                        latex_len && isalpha((unsigned char)tex_math_symbols[j].latex[latex_len - 1])) {
+                        latex_len && isalpha((unsigned char)latex[latex_len - 1])) {
                         ch(b, ' ');
                     }
                     i += len;

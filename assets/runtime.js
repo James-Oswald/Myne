@@ -1,4 +1,22 @@
 document.addEventListener('DOMContentLoaded',()=>{
+  const codeVisibilityToggle=document.querySelector('.code-visibility-toggle');
+  if(codeVisibilityToggle){
+    const applyLeanCodeVisibility=hidden=>{
+      if(hidden)document.documentElement.dataset.hideLean='true';
+      else delete document.documentElement.dataset.hideLean;
+      document.querySelectorAll('.lean-code').forEach(block=>{block.hidden=hidden;});
+      codeVisibilityToggle.setAttribute('aria-pressed',String(hidden));
+      codeVisibilityToggle.textContent=hidden?'Show Lean code':'Hide Lean code';
+    };
+    let hidden=document.documentElement.dataset.hideLean==='true';
+    try{hidden=localStorage.getItem('myne-hide-lean')==='true'}catch(_){}
+    applyLeanCodeVisibility(hidden);
+    codeVisibilityToggle.addEventListener('click',()=>{
+      const next=document.documentElement.dataset.hideLean!=='true';
+      applyLeanCodeVisibility(next);
+      try{localStorage.setItem('myne-hide-lean',String(next))}catch(_){}
+    });
+  }
   if(window.renderMathInElement)renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\[',right:'\\]',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false}],throwOnError:false});
   const referenceNotes=[...document.querySelectorAll('.reference-sidenote')];
   if(referenceNotes.length){
