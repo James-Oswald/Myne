@@ -171,6 +171,7 @@ static int build(int compile_pdf) {
     }
     root_index = gather(rel);
     free(rel);
+    int html_file_count = nfiles;
     if (failed || root_index < 0) {
         return -1;
     }
@@ -220,7 +221,7 @@ static int build(int compile_pdf) {
         return -1;
     }
     if (strcmp(format, "tex")) {
-        load_bibliographies();
+        load_bibliographies(html_file_count);
         if (failed) {
             return -1;
         }
@@ -240,22 +241,33 @@ static int build(int compile_pdf) {
     char *html = join(stage, "html"), *tex = join(stage, "tex");
     if (strcmp(format, "tex")) {
         write_html(html);
+        if (!failed) {
+            char *dummy = join(stage, "unused");
+            project_assets("", html, dummy, 0);
+            remove_tree(dummy);
+            free(dummy);
+        }
+        if (!failed) {
+            char *final = join(output, "html");
+            remove_tree(final);
+            if (rename(html, final)) {
+                die("cannot install HTML output");
+            } else {
+                pthread_mutex_lock(&epoch_lock);
+                epoch++;
+                pthread_mutex_unlock(&epoch_lock);
+            }
+            free(final);
+        }
     }
-    if (strcmp(format, "html")) {
+    if (!failed && strcmp(format, "html")) {
         write_tex(tex);
-    }
-    if (!failed && !strcmp(format, "both")) {
-        project_assets("", html, tex, 0);
-    } else if (!failed && !strcmp(format, "tex")) {
-        char *dummy = join(stage, "unused");
-        project_assets("", dummy, tex, 0);
-        remove_tree(dummy);
-        free(dummy);
-    } else if (!failed) {
-        char *dummy = join(stage, "unused");
-        project_assets("", html, dummy, 0);
-        remove_tree(dummy);
-        free(dummy);
+        if (!failed) {
+            char *dummy = join(stage, "unused");
+            project_assets("", dummy, tex, 0);
+            remove_tree(dummy);
+            free(dummy);
+        }
     }
     if (!failed && compile_pdf) {
         build_pdf(tex);
@@ -273,14 +285,6 @@ static int build(int compile_pdf) {
         free(new_pdf);
     }
     if (!failed) {
-        if (strcmp(format, "tex")) {
-            char *final = join(output, "html");
-            remove_tree(final);
-            if (rename(html, final)) {
-                die("cannot install HTML output");
-            }
-            free(final);
-        }
         if (strcmp(format, "html")) {
             char *final = join(output, "tex");
             remove_tree(final);
@@ -295,9 +299,11 @@ static int build(int compile_pdf) {
     free(html);
     free(tex);
     if (!failed) {
-        pthread_mutex_lock(&epoch_lock);
-        epoch++;
-        pthread_mutex_unlock(&epoch_lock);
+        if (!strcmp(format, "tex")) {
+            pthread_mutex_lock(&epoch_lock);
+            epoch++;
+            pthread_mutex_unlock(&epoch_lock);
+        }
         fprintf(stderr, "myne: built %d files, %d pages in %s\n", nfiles, npages, output);
     }
     return failed ? -1 : 0;
@@ -448,11 +454,11 @@ int main(int argc, char **argv) {
     }
     if (build(watch && !strcmp(format, "both"))) {
         if (!watch) {
-            fprintf(stderr, "myne: build failed; output was not refreshed. Fix the errors above and rerun.\n");
+            fprintf(stderr, "myne: build failed; successful output formats were refreshed. Fix the errors above and rerun.\n");
             return 1;
         }
         fprintf(stderr,
-                "myne: initial build failed; the last successful output remains in place, if available. "
+                "myne: initial build failed; successful output formats were refreshed, if available. "
                 "Fix the errors above; the watcher will retry after a project file changes.\n");
     }
     if (serve && start_server()) {
@@ -470,7 +476,7 @@ int main(int argc, char **argv) {
             previous = next;
             if (build(watch && !strcmp(format, "both"))) {
                 fprintf(stderr,
-                        "myne: rebuild failed; output was not refreshed. Fix the errors above; "
+                        "myne: rebuild failed; successful output formats were refreshed. Fix the errors above; "
                         "Myne will retry after another project file change.\n");
             }
         }

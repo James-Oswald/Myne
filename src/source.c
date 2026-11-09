@@ -315,7 +315,8 @@ static void segment(int kind, const char *s, size_t n) {
     target[(*count)++].s = slice(s, n);
 }
 
-static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_heading_seen);
+static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_heading_seen,
+                         int *math_mode);
 void flatten(int id, int depth);
 
 /* Expand includes at their source location to retain document order. */
@@ -558,6 +559,9 @@ void flatten(int id, int depth) {
             resume = boundary.next;
             if (code_end > begin) {
                 int declaration = lean_kind(s + begin, code_end - begin);
+                if (doc.proof.n) {
+                    declaration = LEAN_THEOREM;
+                }
                 const char *kind_name = lean_kind_name(declaration);
                 Buf label = {0};
                 add(&label, kind_name);
@@ -597,7 +601,7 @@ void flatten(int id, int depth) {
             continue;
         } else {
             Buf body = {0};
-            markdown_tex(&body, s + start, j - start, id == root_index, &top_heading_seen);
+            markdown_tex(&body, s + start, j - start, id == root_index, &top_heading_seen, NULL);
             expand_text(f->rel, body.s ? body.s : "", body.n, depth);
             free(body.s);
         }
@@ -606,7 +610,163 @@ void flatten(int id, int depth) {
 }
 
 /* Convert Markdown headings into the common TeX and HTML heading model. */
-static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_heading_seen) {
+typedef struct {
+    const char *unicode, *latex;
+} TexMathSymbol;
+
+/* Unicode symbols commonly used in Lean formulas, with commands available in amsmath/amssymb. */
+static const TexMathSymbol tex_math_symbols[] = {
+    {"α", "\\alpha"}, {"β", "\\beta"}, {"γ", "\\gamma"}, {"δ", "\\delta"},
+    {"ε", "\\epsilon"}, {"ζ", "\\zeta"}, {"η", "\\eta"}, {"θ", "\\theta"},
+    {"ι", "\\iota"}, {"κ", "\\kappa"}, {"λ", "\\lambda"}, {"μ", "\\mu"},
+    {"ν", "\\nu"}, {"ξ", "\\xi"}, {"ο", "o"}, {"π", "\\pi"},
+    {"ρ", "\\rho"}, {"σ", "\\sigma"}, {"τ", "\\tau"}, {"υ", "\\upsilon"},
+    {"φ", "\\phi"}, {"χ", "\\chi"}, {"ψ", "\\psi"}, {"ω", "\\omega"},
+    {"Α", "A"}, {"Β", "B"}, {"Γ", "\\Gamma"}, {"Δ", "\\Delta"},
+    {"Ε", "E"}, {"Ζ", "Z"}, {"Η", "H"}, {"Θ", "\\Theta"},
+    {"Ι", "I"}, {"Κ", "K"}, {"Λ", "\\Lambda"}, {"Μ", "M"},
+    {"Ν", "N"}, {"Ξ", "\\Xi"}, {"Ο", "O"}, {"Π", "\\Pi"},
+    {"Ρ", "P"}, {"Σ", "\\Sigma"}, {"Τ", "T"}, {"Υ", "\\Upsilon"},
+    {"Φ", "\\Phi"}, {"Χ", "X"}, {"Ψ", "\\Psi"}, {"Ω", "\\Omega"},
+    {"ϵ", "\\varepsilon"}, {"ϑ", "\\vartheta"}, {"ϰ", "\\varkappa"},
+    {"ϕ", "\\varphi"}, {"ϱ", "\\varrho"}, {"ϖ", "\\varpi"}, {"ϴ", "\\Theta"},
+    {"ς", "\\varsigma"}, {"ℓ", "\\ell"}, {"ı", "\\imath"}, {"ȷ", "\\jmath"},
+    {"∞", "\\infty"}, {"∂", "\\partial"}, {"∇", "\\nabla"},
+    {"√", "\\sqrt"}, {"∛", "\\sqrt[3]"}, {"∜", "\\sqrt[4]"},
+    {"∑", "\\sum"}, {"∏", "\\prod"}, {"∐", "\\coprod"},
+    {"∫", "\\int"}, {"∬", "\\iint"}, {"∭", "\\iiint"}, {"∮", "\\oint"},
+    {"∯", "\\oint\\!\\!\\int"}, {"∰", "\\oint\\!\\!\\iiint"},
+    {"∀", "\\forall"}, {"∃", "\\exists"}, {"∄", "\\nexists"},
+    {"¬", "\\neg"}, {"∧", "\\land"}, {"∨", "\\lor"}, {"⊻", "\\veebar"},
+    {"⊤", "\\top"}, {"⊥", "\\bot"}, {"∴", "\\therefore"}, {"∵", "\\because"},
+    {"∈", "\\in"}, {"∉", "\\notin"}, {"∋", "\\ni"}, {"∌", "\\not\\ni"},
+    {"⊂", "\\subset"}, {"⊃", "\\supset"}, {"⊆", "\\subseteq"},
+    {"⊇", "\\supseteq"}, {"⊄", "\\nsubset"}, {"⊈", "\\nsubseteq"},
+    {"⊏", "\\sqsubset"}, {"⊐", "\\sqsupset"}, {"⊑", "\\sqsubseteq"},
+    {"⊒", "\\sqsupseteq"},
+    {"∪", "\\cup"}, {"∩", "\\cap"}, {"∖", "\\setminus"}, {"∅", "\\emptyset"},
+    {"℘", "\\wp"}, {"ℵ", "\\aleph"}, {"ℶ", "\\beth"},
+    {"ℏ", "\\hbar"}, {"ℑ", "\\Im"}, {"ℜ", "\\Re"},
+    {"ℕ", "\\mathbb{N}"}, {"ℤ", "\\mathbb{Z}"}, {"ℚ", "\\mathbb{Q}"},
+    {"ℝ", "\\mathbb{R}"}, {"ℂ", "\\mathbb{C}"}, {"ℙ", "\\mathbb{P}"},
+    {"≤", "\\leq"}, {"≥", "\\geq"}, {"≠", "\\neq"}, {"≈", "\\approx"},
+    {"≃", "\\simeq"}, {"≅", "\\cong"}, {"≡", "\\equiv"}, {"≢", "\\not\\equiv"},
+    {"≐", "\\doteq"}, {"≍", "\\asymp"}, {"≌", "\\doteqdot"},
+    {"∼", "\\sim"}, {"≁", "\\not\\sim"}, {"≊", "\\approxeq"},
+    {"≜", "\\triangleq"}, {"≲", "\\lesssim"}, {"≳", "\\gtrsim"},
+    {"≶", "\\lessgtr"}, {"≷", "\\gtrless"}, {"≦", "\\leqslant"},
+    {"≧", "\\geqslant"},
+    {"≔", "\\mathrel{:=}"}, {"≕", "\\mathrel{=:}"}, {"∝", "\\propto"},
+    {"≪", "\\ll"}, {"≫", "\\gg"}, {"≺", "\\prec"}, {"≻", "\\succ"},
+    {"≼", "\\preceq"}, {"≽", "\\succeq"}, {"⊢", "\\vdash"},
+    {"⊣", "\\dashv"}, {"⊨", "\\models"}, {"⊩", "\\Vdash"},
+    {"←", "\\leftarrow"}, {"→", "\\rightarrow"}, {"↔", "\\leftrightarrow"},
+    {"⇐", "\\Leftarrow"}, {"⇒", "\\Rightarrow"}, {"⇔", "\\Leftrightarrow"},
+    {"↦", "\\mapsto"}, {"↪", "\\hookrightarrow"}, {"↩", "\\hookleftarrow"},
+    {"↗", "\\nearrow"}, {"↘", "\\searrow"}, {"↙", "\\swarrow"},
+    {"↖", "\\nwarrow"}, {"↕", "\\updownarrow"}, {"⇑", "\\Uparrow"},
+    {"⇓", "\\Downarrow"}, {"⇕", "\\Updownarrow"}, {"⟶", "\\longrightarrow"},
+    {"⟵", "\\longleftarrow"}, {"⟷", "\\longleftrightarrow"},
+    {"⟹", "\\Longrightarrow"}, {"⟸", "\\Longleftarrow"},
+    {"⟺", "\\Longleftrightarrow"}, {"⟼", "\\longmapsto"},
+    {"↣", "\\rightarrowtail"}, {"↠", "\\twoheadrightarrow"},
+    {"↬", "\\leadsto"}, {"⤳", "\\rightsquigarrow"},
+    {"±", "\\pm"}, {"∓", "\\mp"}, {"×", "\\times"}, {"÷", "\\div"},
+    {"·", "\\cdot"}, {"⋅", "\\cdot"}, {"∘", "\\circ"}, {"∙", "\\bullet"},
+    {"∗", "\\ast"}, {"⋆", "\\star"}, {"⊕", "\\oplus"}, {"⊖", "\\ominus"},
+    {"⊗", "\\otimes"}, {"⊘", "\\oslash"}, {"⊙", "\\odot"},
+    {"⊞", "\\boxplus"}, {"⊟", "\\boxminus"}, {"⊠", "\\boxtimes"},
+    {"⊡", "\\boxdot"}, {"∔", "\\dotplus"}, {"∸", "\\dotminus"},
+    {"∣", "\\mid"}, {"∤", "\\nmid"}, {"∥", "\\parallel"},
+    {"∦", "\\nparallel"}, {"∠", "\\angle"}, {"∡", "\\measuredangle"},
+    {"∢", "\\sphericalangle"}, {"∟", "\\angle"}, {"⋈", "\\bowtie"},
+    {"⋉", "\\ltimes"},
+    {"⋊", "\\rtimes"}, {"⊓", "\\sqcap"}, {"⊔", "\\sqcup"}, {"⌊", "\\lfloor"},
+    {"⌋", "\\rfloor"}, {"⌈", "\\lceil"}, {"⌉", "\\rceil"},
+    {"⟨", "\\langle"}, {"⟩", "\\rangle"}, {"…", "\\ldots"}, {"⋯", "\\cdots"},
+    {"⋮", "\\vdots"}, {"⋱", "\\ddots"}, {"′", "\\prime"}, {"″", "\\prime\\prime"},
+    {"−", "-"}, {"⁄", "/"}, {" ", "~"},
+    {"⁰", "^{0}"}, {"¹", "^{1}"}, {"²", "^{2}"}, {"³", "^{3}"},
+    {"⁴", "^{4}"}, {"⁵", "^{5}"}, {"⁶", "^{6}"}, {"⁷", "^{7}"},
+    {"⁸", "^{8}"}, {"⁹", "^{9}"}, {"⁺", "^{+}"}, {"⁻", "^{-}"},
+    {"⁼", "^{=}"}, {"⁽", "^{(}"}, {"⁾", "^{)}"}, {"ⁿ", "^{n}"},
+    {"ⁱ", "^{i}"}, {"₀", "_{0}"}, {"₁", "_{1}"}, {"₂", "_{2}"},
+    {"₃", "_{3}"}, {"₄", "_{4}"}, {"₅", "_{5}"}, {"₆", "_{6}"},
+    {"₇", "_{7}"}, {"₈", "_{8}"}, {"₉", "_{9}"}, {"₊", "_{+}"},
+    {"₋", "_{-}"}, {"₌", "_{=}"}, {"₍", "_{(}"}, {"₎", "_{)}"},
+    {"ₐ", "_{a}"}, {"ₑ", "_{e}"}, {"ₒ", "_{o}"}, {"ₓ", "_{x}"},
+    {"ₕ", "_{h}"}, {"ₖ", "_{k}"}, {"ₗ", "_{l}"}, {"ₘ", "_{m}"},
+    {"ₙ", "_{n}"}, {"ₚ", "_{p}"}, {"ₛ", "_{s}"}, {"ₜ", "_{t}"}
+};
+
+static int tex_is_escaped(const char *s, size_t i) {
+    size_t slashes = 0;
+    while (i && s[i - 1] == '\\') {
+        slashes++;
+        i--;
+    }
+    return slashes % 2;
+}
+
+static void tex_math_text(Buf *b, const char *s, size_t n, int *math_mode) {
+    for (size_t i = 0; i < n;) {
+        if (s[i] == '$' && !tex_is_escaped(s, i)) {
+            int delimiter = i + 1 < n && s[i + 1] == '$' ? 2 : 1;
+            if (!*math_mode) {
+                *math_mode = delimiter;
+            } else if (*math_mode == delimiter) {
+                *math_mode = 0;
+            }
+            addn(b, s + i, (size_t)delimiter);
+            i += (size_t)delimiter;
+            continue;
+        }
+        if (s[i] == '\\' && !tex_is_escaped(s, i) && i + 1 < n &&
+            (s[i + 1] == '(' || s[i + 1] == '[')) {
+            int delimiter = s[i + 1] == '(' ? 3 : 4;
+            if (!*math_mode) {
+                *math_mode = delimiter;
+            }
+            addn(b, s + i, 2);
+            i += 2;
+            continue;
+        }
+        if (s[i] == '\\' && !tex_is_escaped(s, i) && i + 1 < n &&
+            (s[i + 1] == ')' || s[i + 1] == ']')) {
+            int delimiter = s[i + 1] == ')' ? 3 : 4;
+            if (*math_mode == delimiter) {
+                *math_mode = 0;
+            }
+            addn(b, s + i, 2);
+            i += 2;
+            continue;
+        }
+        if (*math_mode) {
+            int replaced = 0;
+            for (size_t j = 0; j < sizeof(tex_math_symbols) / sizeof(*tex_math_symbols); j++) {
+                size_t len = strlen(tex_math_symbols[j].unicode);
+                if (i + len <= n && !memcmp(s + i, tex_math_symbols[j].unicode, len)) {
+                    add(b, tex_math_symbols[j].latex);
+                    size_t latex_len = strlen(tex_math_symbols[j].latex);
+                    if (i + len < n && isalpha((unsigned char)s[i + len]) &&
+                        latex_len && isalpha((unsigned char)tex_math_symbols[j].latex[latex_len - 1])) {
+                        ch(b, ' ');
+                    }
+                    i += len;
+                    replaced = 1;
+                    break;
+                }
+            }
+            if (replaced) {
+                continue;
+            }
+        }
+        ch(b, s[i++]);
+    }
+}
+
+static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_heading_seen,
+                         int *math_mode) {
     for (size_t i = 0; i < n;) {
         size_t e = i;
         while (e < n && s[e] != '\n') {
@@ -620,7 +780,7 @@ static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_h
         while (k < e && s[k] == '#') {
             k++;
         }
-        if (k > h && k < e && s[k] == ' ') {
+        if ((!math_mode || !*math_mode) && k > h && k < e && s[k] == ' ') {
             const char *cmd = k - h == 1 ? (!*top_heading_seen && isroot ? "title"
                                              : !*top_heading_seen        ? "chapter"
                                                                         : "section")
@@ -637,13 +797,21 @@ static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_h
             ch(b, '\\');
             add(b, cmd);
             ch(b, '{');
-            addn(b, s + k + 1, tail - k - 1);
+            if (math_mode) {
+                tex_math_text(b, s + k + 1, tail - k - 1, math_mode);
+            } else {
+                addn(b, s + k + 1, tail - k - 1);
+            }
             add(b, "}\n");
             if (k - h == 1 && isroot) {
                 add(b, "\\maketitle\n");
             }
         } else {
-            addn(b, s + i, e - i);
+            if (math_mode) {
+                tex_math_text(b, s + i, e - i, math_mode);
+            } else {
+                addn(b, s + i, e - i);
+            }
             ch(b, '\n');
         }
         i = e < n ? e + 1 : e;
@@ -655,7 +823,7 @@ static void translate_lean(File *f, int isroot) {
     const char *s = f->data;
     size_t n = strlen(s);
     Buf b = {0}, appendix_tex = {0};
-    int top_heading_seen = 0, appendix_open = 0;
+    int top_heading_seen = 0, appendix_open = 0, math_mode = 0;
     for (size_t i = 0; i < n;) {
         size_t next = 0;
         char *appendix_name = NULL;
@@ -724,6 +892,9 @@ static void translate_lean(File *f, int isroot) {
             i = boundary.next;
             if (boundary.end > begin) {
                 int declaration = lean_kind(s + begin, boundary.end - begin);
+                if (doc.proof.n) {
+                    declaration = LEAN_THEOREM;
+                }
                 const char *environment = lean_environment(declaration);
                 if (environment) {
                     add(out, "\n\\begin{");
@@ -741,10 +912,11 @@ static void translate_lean(File *f, int isroot) {
                 if (doc.annotated) {
                     Buf body = {0};
                     lean_doc_body(&body, &doc, declaration, 1);
-                    markdown_tex(out, body.s ? body.s : "", body.n, isroot, &top_heading_seen);
+                    markdown_tex(out, body.s ? body.s : "", body.n, isroot, &top_heading_seen,
+                                 &math_mode);
                     free(body.s);
                 } else {
-                    markdown_tex(out, s + start, j - start, isroot, &top_heading_seen);
+                    markdown_tex(out, s + start, j - start, isroot, &top_heading_seen, &math_mode);
                 }
                 if (environment) {
                     add(out, "\n\\end{");
@@ -756,7 +928,7 @@ static void translate_lean(File *f, int isroot) {
             }
             lean_doc_free(&doc);
         }
-        markdown_tex(out, s + start, j - start, isroot, &top_heading_seen);
+        markdown_tex(out, s + start, j - start, isroot, &top_heading_seen, &math_mode);
     }
     if (appendix_open) {
         die("missing --myne:appendix_end in %s", f->rel);

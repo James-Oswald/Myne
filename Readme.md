@@ -89,6 +89,8 @@ The [Myne KaTeX Preview extension](vscode-extension/README.md) opens a live side
 
 For a Lean `/-- ... -/` comment attached to a `def`, `lemma`, or `theorem`, HTML places the comment and highlighted declaration inside one box. TeX emits the comment in an AMS `definition`, `lemma`, or `theorem` environment and omits the Lean source. Module comments (`/-! ... -/`) remain document prose.
 
+When generating TeX from Lean documentation, Myne translates common Unicode math symbols inside `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` into LaTeX commands. This includes Greek letters, operators, relations, arrows, set symbols, and common superscripts and subscripts; Unicode outside math delimiters is preserved.
+
 ## Usage / Features
 
 Myne can be run at the command line using the myne command. Myne can be configured using a `myne.toml` configuration file or passing configuration options directly as command line arguments.
@@ -220,7 +222,7 @@ If the root file is a latex file, it should contain a document class command wit
 
 ## Annotated Lean declarations
 
-Attached Lean doc comments accept `@name`, `@nl`, `@formula`, and `@proof` fields. `@name` supplies the declaration title; `@nl` supplies its natural-language statement and is the default prose field; `@formula` supplies a display formula; and `@proof` supplies a natural-language proof for lemmas and theorems. Fields begin on their own line and continue until the next field. See `examples/annotations/main.lean` for a complete example.
+Attached Lean doc comments accept `@name`, `@nl`, `@formula`, and `@proof` fields. `@name` supplies the declaration title; `@nl` supplies its natural-language statement and is the default prose field; `@formula` supplies a display formula; and `@proof` supplies a natural-language proof and classifies the attached declaration as a theorem. This lets instances with a natural-language proof render as theorems without requiring Myne to infer whether their types are propositions. Fields begin on their own line and continue until the next field. See `examples/annotations/main.lean` for a complete example.
 
 Add `@capture block` on its own line in a doc comment to include multiple following declarations, including blank lines, in one web code box. End the group with a standalone `--myne:end` line. The marker is excluded from the rendered code. Myne reports an error if the marker is missing. The TeX output still renders the comment once and omits its Lean code. See `examples/showcase/Chapters/Arithmetic.lean` for a complete example. For example:
 Use `--myne:appendix_start NAME` and `--myne:appendix_end` as standalone Lean line comments to move the enclosed material to a named appendix after the main text. In web output, appendices are grouped under an **Appendices** category, with each appendix on its own page beneath it and lettered A, B, and so on; declaration numbering restarts within each appendix. TeX output places `\appendix` in the root document after the main text, then inputs the named appendix sections. Markers must be paired and cannot nest.

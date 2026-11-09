@@ -26,6 +26,44 @@ void die(const char *fmt, ...) {
     failed = 1;
 }
 
+void missing_bibliography(const char *source, const char *contents, size_t offset,
+                          const char *ref, const char *path) {
+    size_t line = 1;
+    for (size_t i = 0; i < offset; i++) {
+        if (contents[i] == '\n') line++;
+    }
+    const char *expected = path;
+    size_t base_len = strlen(basedir);
+    if (!strncmp(path, basedir, base_len) && path[base_len] == '/') {
+        expected = path + base_len + 1;
+    }
+    die("%s:%zu: \\bibliography{%s} requires %s, but that file was not found",
+        source, line, ref, expected);
+    char *name = xstrdup(ref);
+    if (!ends(name, ".bib")) {
+        Buf b = {0};
+        add(&b, name);
+        add(&b, ".bib");
+        free(name);
+        name = b.s;
+    }
+    char *candidate = join(basedir, name);
+    if (strcmp(candidate, path) && access(candidate, R_OK) == 0) {
+        Buf suggestion = {0};
+        for (const char *p = source; *p; p++) {
+            if (*p == '/') add(&suggestion, "../");
+        }
+        add(&suggestion, ref);
+        fprintf(stderr, "myne:   Found %s at the project root; use \\bibliography{%s} here.\n",
+                name, suggestion.s ? suggestion.s : ref);
+        free(suggestion.s);
+    } else {
+        fprintf(stderr, "myne:   Add %s or correct the \\bibliography path.\n", expected);
+    }
+    free(candidate);
+    free(name);
+}
+
 void *xmalloc(size_t n) {
     void *p = malloc(n ? n : 1);
     if (!p) {

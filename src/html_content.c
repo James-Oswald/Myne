@@ -139,11 +139,11 @@ static void parse_bib(const char *rel) {
 }
 
 /* Bibliographies can come from the manifest or a TeX bibliography command. */
-void load_bibliographies(void) {
+void load_bibliographies(int file_limit) {
     for (int i = 0; i < nbibcfg; i++) {
         parse_bib(bibcfg[i]);
     }
-    for (int i = 0; i < nfiles; i++) {
+    for (int i = 0; i < file_limit; i++) {
         const char *s = files[i].data;
         size_t n = strlen(s);
         for (size_t j = 0; j + 13 < n; j++) {
@@ -165,7 +165,7 @@ void load_bibliographies(void) {
                     if (rel && access(path, R_OK) == 0) {
                         parse_bib(rel);
                     } else {
-                        die("missing bibliography %s from %s", ref, files[i].rel);
+                        missing_bibliography(files[i].rel, s, j, ref, path);
                     }
                     free(path);
                     free(rel);

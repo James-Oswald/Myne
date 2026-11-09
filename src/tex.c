@@ -76,6 +76,11 @@ static char *rewrite_refs(const char *s, const char *source) {
         } else if (kind == 2) {
             char *path = path_from(source, arg), *rel = project_rel(path);
             if (!rel) {
+                char *root_path = join(basedir, arg);
+                rel = project_rel(root_path);
+                free(root_path);
+            }
+            if (!rel) {
                 die("missing graphic %s from %s", arg, source);
             } else {
                 add(&b, rel);
@@ -94,7 +99,7 @@ static char *rewrite_refs(const char *s, const char *source) {
                 }
                 char *path = path_from(source, name.s), *rel = project_rel(path);
                 if (!rel) {
-                    die("missing bibliography %s from %s", v, source);
+                    missing_bibliography(source, s, i, v, path);
                 } else {
                     if (!first++) {
                         ch(&b, ',');
@@ -252,8 +257,10 @@ void write_tex(const char *dir) {
             add(&b, f->tex);
         } else if (i == tex_template_index && tex_template_index >= 0) {
             int content_found = 0, setup_found = 0;
-            char *content = remove_root_title(files[root_index].tex);
-            char *with_content = replace_once(f->data, "{{MYNE_CONTENT}}", content, &content_found);
+            char *raw_content = remove_root_title(files[root_index].tex);
+            char *content = rewrite_refs(raw_content, files[root_index].rel);
+            char *template_body = rewrite_refs(f->data, f->rel);
+            char *with_content = replace_once(template_body, "{{MYNE_CONTENT}}", content, &content_found);
             Buf setup = {0};
             if (has_boxes) {
                 theorem_setup(&setup);
@@ -267,7 +274,9 @@ void write_tex(const char *dir) {
                 die("TeX template is missing {{MYNE_THEOREM_SETUP}}: %s", f->rel);
             }
             add(&b, complete);
+            free(raw_content);
             free(content);
+            free(template_body);
             free(with_content);
             free(complete);
             free(setup.s);
@@ -309,7 +318,7 @@ void write_tex(const char *dir) {
         } else {
             add(&b, f->lean ? f->tex : f->data);
         }
-        char *body = rewrite_refs(b.s, f->rel);
+        char *body = i == tex_template_index ? xstrdup(b.s) : rewrite_refs(b.s, f->rel);
         int final_root = tex_template_index >= 0 ? i == tex_template_index : i == root_index;
         if (final_root && appendices.n) {
             char *complete = insert_appendices(body, appendices.s);

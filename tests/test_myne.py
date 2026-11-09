@@ -20,6 +20,39 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 class MyneTests(unittest.TestCase):
+    def test_tex_bibliography_failure_reports_line_and_refreshes_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "src").mkdir()
+            (base / "myne.toml").write_text(
+                'root = "main.lean"\nformat = "both"\ntexTemplate = "src/template.tex"\n'
+            )
+            (base / "refs.bib").write_text("@article{sample, title={Sample}}\n")
+            template = base / "src/template.tex"
+            def tex(bib: str) -> str:
+                return (
+                    "\\documentclass{article}\n"
+                    "{{MYNE_THEOREM_SETUP}}\n"
+                    "\\begin{document}\n"
+                    "{{MYNE_CONTENT}}\n"
+                    f"\\bibliography{{{bib}}}\n"
+                    "\\end{document}\n"
+                )
+            template.write_text(tex("../refs"))
+            root = base / "main.lean"
+            root.write_text("/-! \\title{Test}\n\\section{Main}First version. -/\n")
+            first = run(cwd=base)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            old_tex = (base / "out/tex/src/template.tex").read_text()
+            root.write_text("/-! \\title{Test}\n\\section{Main}Second version. -/\n")
+            template.write_text(tex("refs"))
+            second = run(cwd=base)
+            self.assertNotEqual(second.returncode, 0)
+            self.assertIn("src/template.tex:5: \\bibliography{refs} requires src/refs.bib", second.stderr)
+            self.assertIn("use \\bibliography{../refs} here", second.stderr)
+            self.assertIn("Second version.", (base / "out/html/section-001.html").read_text())
+            self.assertEqual(old_tex, (base / "out/tex/src/template.tex").read_text())
+
     def test_latex_quotation_marks_render_on_web(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)

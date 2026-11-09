@@ -182,7 +182,9 @@ const char *heading_name(int type);
 int include_at(const char *s, size_t n, size_t i, size_t *end, char **arg);
 char *join(const char *a, const char *b);
 int keyword(const char *s, size_t n);
-void load_bibliographies(void);
+void load_bibliographies(int file_limit);
+void missing_bibliography(const char *source, const char *contents, size_t offset,
+                          const char *ref, const char *path);
 void load_config(const char *path);
 int mkdirs(const char *path);
 char *path_from(const char *from, const char *ref);
