@@ -84,7 +84,8 @@ typedef struct {
     int kind;
     char *s;
     char *doc_name, *doc_nl, *doc_formula;
-    int file;
+    char *raw_name, *label;
+    int file, capture;
 } Segment;
 
 typedef struct {
@@ -164,6 +165,7 @@ void ch(Buf *b, char c);
 void clear_project(void);
 int copy_file(const char *src, const char *dst);
 void dependency_collect(void);
+char *lean_syntactic_name(const char *source, size_t n);
 int dependency_edge(int from, int to);
 void dependency_elaborate(void);
 void dependency_prune(void);
@@ -172,6 +174,8 @@ char *document_pdf_name(void);
 int ends(const char *s, const char *e);
 void escape(Buf *b, const char *s);
 void escape_latex_text(Buf *b, const char *s);
+void escape_latex_refs(Buf *b, const char *s, int link);
+void resolve_ref_buffer(Buf *body);
 int file_index(const char *rel);
 const char *finds(const char *s, size_t n, const char *pat);
 unsigned long long fingerprint_dir(const char *rel, int depth);

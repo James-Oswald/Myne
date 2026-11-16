@@ -96,12 +96,13 @@ static const char *lean_environment(int kind) {
 }
 
 typedef struct {
-    Buf name, nl, formula, proof, plain;
+    Buf name, label, nl, formula, proof, plain;
     int annotated, capture;
 } LeanDoc;
 
 static void lean_doc_free(LeanDoc *doc) {
     free(doc->name.s);
+    free(doc->label.s);
     free(doc->nl.s);
     free(doc->formula.s);
     free(doc->proof.s);
@@ -133,6 +134,7 @@ static int lean_doc_tag(const char *s, size_t n, const char **tag, size_t *tag_l
     }
     size_t len = i - begin;
     if (!((len == 4 && !memcmp(s + begin, "name", 4)) ||
+          (len == 5 && !memcmp(s + begin, "label", 5)) ||
           (len == 2 && !memcmp(s + begin, "nl", 2)) ||
           (len == 7 && !memcmp(s + begin, "formula", 7)) ||
           (len == 5 && !memcmp(s + begin, "proof", 5)) ||
@@ -197,8 +199,11 @@ static LeanDoc lean_doc_parse(const char *s, size_t n) {
                 }
                 doc.capture = 1;
                 field = NULL;
-            } else if (tag_len == 4) {
-                field = &doc.name;
+            } else if (tag_len == 4 || (tag_len == 5 && !memcmp(tag, "label", 5))) {
+                field = tag_len == 4 ? &doc.name : &doc.label;
+                if (field->n) {
+                    die("duplicate @%.*s annotation", (int)tag_len, tag);
+                }
                 lean_doc_append(field, s + i + value_start, end - i - value_start);
                 field = NULL;
             } else {
@@ -240,6 +245,9 @@ static void lean_doc_body(Buf *b, LeanDoc *doc, int kind, int for_tex) {
         if (for_tex) {
             add(b, "\\begin{proof}\n");
         } else {
+            /* HTML rendering collapses source newlines, so force the proof
+               label onto a fresh visual line. */
+            add(b, "\\\\\n");
             add(b, "\\textit{Proof.} ");
         }
         addn(b, doc->proof.s, doc->proof.n);
@@ -316,7 +324,10 @@ static void segment(int kind, const char *s, size_t n) {
     target[*count].doc_name = NULL;
     target[*count].doc_nl = NULL;
     target[*count].doc_formula = NULL;
+    target[*count].raw_name = NULL;
+    target[*count].label = NULL;
     target[*count].file = -1;
+    target[*count].capture = 0;
     target[(*count)++].s = slice(s, n);
 }
 
@@ -509,7 +520,7 @@ void flatten(int id, int depth) {
                     return;
                 }
                 appendix_segs[nappendix_segs++] =
-                    (Segment){SEG_APPENDIX_START, appendix_name, NULL, NULL, NULL, -1};
+                    (Segment){.kind = SEG_APPENDIX_START, .s = appendix_name, .file = -1};
                 appendix_capture = 1;
             } else {
                 if (!appendix_capture) {
@@ -577,6 +588,13 @@ void flatten(int id, int depth) {
                     add(&label, kind_name);
                 }
                 segment(SEG_BOX_OPEN, label.s, label.n);
+                Segment *box = appendix_capture ? &appendix_segs[nappendix_segs - 1]
+                                                 : &segs[nsegs - 1];
+                box->raw_name = lean_syntactic_name(s + begin, code_end - begin);
+                box->capture = doc.capture;
+                if (doc.label.n) {
+                    box->label = slice(doc.label.s, lean_doc_trimmed_len(&doc.label));
+                }
                 free(label.s);
                 Buf body = {0};
                 if (doc.annotated) {
@@ -880,6 +898,28 @@ static void markdown_tex(Buf *b, const char *s, size_t n, int isroot, int *top_h
     }
 }
 
+static void lean_doc_labels(Buf *out, const char *source, size_t n, const Buf *custom) {
+    size_t custom_len = lean_doc_trimmed_len(custom);
+    for (size_t line = 0; line < n;) {
+        size_t end = line;
+        while (end < n && source[end] != '\n') end++;
+        char *name = lean_syntactic_name(source + line, end - line);
+        if (name && !(custom_len == strlen(name) &&
+                      !memcmp(custom->s, name, custom_len))) {
+            add(out, "\\label{");
+            add(out, name);
+            add(out, "}\n");
+        }
+        free(name);
+        line = end < n ? end + 1 : end;
+    }
+    if (custom_len) {
+        add(out, "\\label{");
+        addn(out, custom->s, custom_len);
+        add(out, "}\n");
+    }
+}
+
 /* Each Lean file has an independent TeX translation for the worker pool. */
 static void translate_lean(File *f, int isroot) {
     const char *s = f->data;
@@ -970,6 +1010,7 @@ static void translate_lean(File *f, int isroot) {
                         add(out, "}\n");
                     }
                     f->has_boxes = 1;
+                    lean_doc_labels(out, s + begin, boundary.end - begin, &doc.label);
                 }
                 if (doc.annotated) {
                     Buf body = {0};

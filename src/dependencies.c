@@ -90,6 +90,20 @@ static int dependency_declaration(const char *s, size_t begin, size_t end, size_
     return 1;
 }
 
+char *lean_syntactic_name(const char *source, size_t n) {
+    for (size_t line = 0; line < n;) {
+        size_t end = line;
+        while (end < n && source[end] != '\n') end++;
+        size_t keyword = 0, name = 0, name_len = 0;
+        int kind = LEAN_CODE;
+        if (dependency_declaration(source, line, end, &keyword, &name, &name_len, &kind)) {
+            return slice(source + name, name_len);
+        }
+        line = end < n ? end + 1 : end;
+    }
+    return NULL;
+}
+
 static void dependency_collect_code(const char *source, int segment) {
     while (isspace((unsigned char)*source)) source++;
     size_t n = strlen(source), current_start = 0;

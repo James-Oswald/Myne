@@ -216,6 +216,8 @@ static int build(int compile_pdf) {
         appendix_segs[i].doc_name = NULL;
         appendix_segs[i].doc_nl = NULL;
         appendix_segs[i].doc_formula = NULL;
+        appendix_segs[i].raw_name = NULL;
+        appendix_segs[i].label = NULL;
     }
     if (failed) {
         return -1;

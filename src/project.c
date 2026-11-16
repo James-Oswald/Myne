@@ -515,12 +515,16 @@ void clear_project(void) {
         free(segs[i].doc_name);
         free(segs[i].doc_nl);
         free(segs[i].doc_formula);
+        free(segs[i].raw_name);
+        free(segs[i].label);
     }
     for (int i = 0; i < nappendix_segs; i++) {
         free(appendix_segs[i].s);
         free(appendix_segs[i].doc_name);
         free(appendix_segs[i].doc_nl);
         free(appendix_segs[i].doc_formula);
+        free(appendix_segs[i].raw_name);
+        free(appendix_segs[i].label);
     }
     for (int i = 0; i < npages; i++) {
         free(pages[i].title);

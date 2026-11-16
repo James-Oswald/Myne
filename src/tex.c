@@ -232,9 +232,70 @@ static char *insert_appendices(const char *source, const char *appendices) {
     return result.s;
 }
 
+static int project_uses_cref(void) {
+    for (int i = 0; i < nfiles; i++) {
+        const char *text = files[i].lean ? files[i].tex : files[i].data;
+        if ((text && strstr(text, "\\cref{")) ||
+            (files[i].appendix_tex && strstr(files[i].appendix_tex, "\\cref{"))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void warn_tex_captured_refs(void) {
+    for (int i = 0; i < nsegs; i++) {
+        if (segs[i].kind != SEG_BOX_OPEN || !segs[i].capture) continue;
+        int code = i + 1;
+        while (code < nsegs && segs[code].kind != SEG_CODE &&
+               segs[code].kind != SEG_BOX_CLOSE) code++;
+        if (code == nsegs || segs[code].kind != SEG_CODE) continue;
+        const char *source = segs[code].s;
+        size_t n = strlen(source);
+        for (size_t line = 0; line < n;) {
+            size_t end = line;
+            while (end < n && source[end] != '\n') end++;
+            char *name = lean_syntactic_name(source + line, end - line);
+            if (name) {
+                Buf ref = {0}, cref = {0};
+                add(&ref, "\\ref{"); add(&ref, name); add(&ref, "}");
+                add(&cref, "\\cref{"); add(&cref, name); add(&cref, "}");
+                for (int f = 0; f < nfiles; f++) {
+                    const char *text = files[f].lean ? files[f].tex : files[f].data;
+                    if (text && (strstr(text, ref.s) || strstr(text, cref.s))) {
+                        fprintf(stderr, "myne: warning: reference %s uses a declaration inside a captured block; use @label for a stable name\n",
+                                name);
+                        break;
+                    }
+                }
+                free(ref.s);
+                free(cref.s);
+            }
+            free(name);
+            line = end < n ? end + 1 : end;
+        }
+    }
+}
+
+static char *add_cleveref_package(const char *source) {
+    if (strstr(source, "{cleveref}")) return xstrdup(source);
+    const char *begin = strstr(source, "\\begin{document}");
+    if (!begin) {
+        die("TeX root has no \\begin{document} for cleveref");
+        return xstrdup(source);
+    }
+    Buf result = {0};
+    addn(&result, source, begin - source);
+    add(&result, "\\usepackage{cleveref}\n");
+    add(&result, begin);
+    return result.s;
+}
+
 void write_tex(const char *dir) {
     mkdirs(dir);
+    if (!strcmp(format, "tex")) warn_tex_captured_refs();
     int has_boxes = 0;
+    int has_cref = project_uses_cref();
     Buf appendices = {0};
     for (int i = 0; i < nfiles; i++) {
         has_boxes |= files[i].has_boxes;
@@ -320,6 +381,11 @@ void write_tex(const char *dir) {
         }
         char *body = i == tex_template_index ? xstrdup(b.s) : rewrite_refs(b.s, f->rel);
         int final_root = tex_template_index >= 0 ? i == tex_template_index : i == root_index;
+        if (final_root && has_cref) {
+            char *with_package = add_cleveref_package(body);
+            free(body);
+            body = with_package;
+        }
         if (final_root && appendices.n) {
             char *complete = insert_appendices(body, appendices.s);
             free(body);

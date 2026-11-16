@@ -12,7 +12,7 @@ static void nav_html(Buf *b, int active) {
         root_heading = page_heading_level;
     }
     add(b, "<nav class=toc-nav aria-label=\"Table of contents\"><a class=nav-title href=\"index.html\">");
-    escape_latex_text(b, doc_title ? doc_title : "Myne");
+    escape_latex_refs(b, doc_title ? doc_title : "Myne", 0);
     add(b, "</a>");
     for (int i = 0; i < npages; i++) {
         if (!i && npages > 1) {
@@ -47,7 +47,7 @@ static void nav_html(Buf *b, int active) {
             escape(b, pages[i].number);
             add(b, "</span> ");
         }
-        escape_latex_text(b, pages[i].title);
+        escape_latex_refs(b, pages[i].title, 0);
         add(b, "</a>");
     }
     add(b, "</nav>");
@@ -117,7 +117,7 @@ static void page_toc_html(Buf *b, int page) {
             escape(b, pages[j].number);
             add(b, "</span> ");
         }
-        escape_latex_text(b, pages[j].title);
+        escape_latex_refs(b, pages[j].title, 0);
         add(b, "</a></li>");
     }
     add(b, "</ul></nav>");
@@ -140,7 +140,7 @@ static int has_lean_code(void) {
 
 static void header_html(Buf *b, int show_code_toggle) {
     add(b, "<header class=site-header><a class=site-title href=\"index.html\">");
-    escape_latex_text(b, doc_title ? doc_title : "Myne");
+    escape_latex_refs(b, doc_title ? doc_title : "Myne", 0);
     add(b, "</a><nav class=header-actions aria-label=\"Document actions\">");
     if (!strcmp(format, "both")) {
         char *pdf = document_pdf_name();
@@ -166,7 +166,7 @@ static void dependency_graph_html(const char *dir) {
     add(&html, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta "
                "name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Dependency "
                "Graph — ");
-    escape_latex_text(&html, doc_title ? doc_title : "Myne");
+    escape_latex_refs(&html, doc_title ? doc_title : "Myne", 0);
     add(&html, "</title>");
     if (dark_mode_toggle) {
         add(&html,
@@ -273,6 +273,7 @@ static void dependency_graph_html(const char *dir) {
         add(&html, "</text></g></a>");
     }
     add(&html, "</g></svg></div><div class=dependency-tooltip role=tooltip hidden></div></main></body></html>\n");
+    resolve_ref_buffer(&html);
     char *path = join(dir, "dependencies.html");
     if (write_all(path, html.s, html.n)) die("cannot write %s", path);
     free(path);
@@ -308,9 +309,9 @@ void write_html(const char *dir) {
             escape(&html, pages[i].number);
             ch(&html, ' ');
         }
-        escape_latex_text(&html, pages[i].title);
+        escape_latex_refs(&html, pages[i].title, 0);
         add(&html, " — ");
-        escape_latex_text(&html, doc_title ? doc_title : "Myne");
+        escape_latex_refs(&html, doc_title ? doc_title : "Myne", 0);
         add(&html, "</title>");
         if (dark_mode_toggle) {
             add(&html,
@@ -341,7 +342,7 @@ void write_html(const char *dir) {
             escape(&html, pages[i].number);
             add(&html, "</span> ");
         }
-        escape_latex_text(&html, pages[i].title);
+        escape_latex_refs(&html, pages[i].title, 1);
         add(&html, "</h1>");
         if (i == 0 && pages[0].byline.n) {
             addn(&html, pages[0].byline.s, pages[0].byline.n);
@@ -358,7 +359,7 @@ void write_html(const char *dir) {
                     escape(&html, pages[j].number);
                     add(&html, "</span> ");
                 }
-                escape_latex_text(&html, pages[j].title);
+                escape_latex_refs(&html, pages[j].title, 0);
                 add(&html, "</a></li>");
             }
             add(&html, "</ul>");
@@ -372,7 +373,7 @@ void write_html(const char *dir) {
                 add(&html, "<li><a href=\"");
                 escape(&html, pages[j].slug);
                 add(&html, "\">");
-                escape_latex_text(&html, pages[j].title);
+                escape_latex_refs(&html, pages[j].title, 0);
                 add(&html, "</a></li>");
             }
             add(&html, "</ul>");
@@ -384,6 +385,7 @@ void write_html(const char *dir) {
         }
         page_toc_html(&html, i);
         add(&html, "</main></body></html>\n");
+        resolve_ref_buffer(&html);
         char *path = join(dir, pages[i].slug);
         if (write_all(path, html.s, html.n)) {
             die("cannot write %s", path);

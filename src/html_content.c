@@ -1,5 +1,130 @@
 #include "myne_internal.h"
 
+typedef struct {
+    char *slug, *number, *kind;
+} RefTarget;
+
+typedef struct {
+    char *key;
+    int target, captured, warned;
+} RefLabel;
+
+typedef struct {
+    char *key;
+    int clever, link;
+} RefUse;
+
+static RefTarget *ref_targets;
+static RefLabel *ref_labels;
+static RefUse *ref_uses;
+static int nref_targets, nref_labels, nref_uses;
+static int current_ref_target = -1;
+
+static void reset_html_refs(void) {
+    for (int i = 0; i < nref_targets; i++) {
+        free(ref_targets[i].slug);
+        free(ref_targets[i].number);
+        free(ref_targets[i].kind);
+    }
+    for (int i = 0; i < nref_labels; i++) free(ref_labels[i].key);
+    for (int i = 0; i < nref_uses; i++) free(ref_uses[i].key);
+    free(ref_targets);
+    free(ref_labels);
+    free(ref_uses);
+    ref_targets = NULL;
+    ref_labels = NULL;
+    ref_uses = NULL;
+    nref_targets = nref_labels = nref_uses = 0;
+    current_ref_target = -1;
+}
+
+static int new_ref_target(const char *number, const char *kind) {
+    int id = nref_targets++;
+    ref_targets = realloc(ref_targets, (size_t)nref_targets * sizeof(*ref_targets));
+    if (!ref_targets) abort();
+    ref_targets[id] = (RefTarget){xstrdup(pages[current].slug), xstrdup(number), xstrdup(kind)};
+    current_ref_target = id;
+    return id;
+}
+
+static void add_ref_label(const char *key, int target, int captured) {
+    if (!key || !*key || target < 0) return;
+    for (int i = 0; i < nref_labels; i++) {
+        if (!strcmp(ref_labels[i].key, key)) {
+            if (ref_labels[i].target != target) {
+                fprintf(stderr, "myne: warning: duplicate label %s\n", key);
+            }
+            return;
+        }
+    }
+    ref_labels = realloc(ref_labels, (size_t)(nref_labels + 1) * sizeof(*ref_labels));
+    if (!ref_labels) abort();
+    ref_labels[nref_labels++] = (RefLabel){xstrdup(key), target, captured, 0};
+}
+
+static void ref_placeholder(Buf *b, const char *key, int clever, int link) {
+    ref_uses = realloc(ref_uses, (size_t)(nref_uses + 1) * sizeof(*ref_uses));
+    if (!ref_uses) abort();
+    ref_uses[nref_uses] = (RefUse){xstrdup(key), clever, link};
+    char marker[48];
+    snprintf(marker, sizeof(marker), "@@MYNE_REF_%d@@", nref_uses++);
+    add(b, marker);
+}
+
+void resolve_ref_buffer(Buf *body) {
+    if (!body->s) return;
+    Buf out = {0};
+    const char *cursor = body->s, *hit;
+    while ((hit = strstr(cursor, "@@MYNE_REF_"))) {
+        addn(&out, cursor, hit - cursor);
+        char *end = NULL;
+        long use = strtol(hit + 11, &end, 10);
+        if (end == hit + 11 || strncmp(end, "@@", 2) || use < 0 || use >= nref_uses) {
+            addn(&out, hit, 11);
+            cursor = hit + 11;
+            continue;
+        }
+        RefUse *reference = &ref_uses[use];
+        RefLabel *label = NULL;
+        for (int i = 0; i < nref_labels; i++) {
+            if (!strcmp(ref_labels[i].key, reference->key)) {
+                label = &ref_labels[i];
+                break;
+            }
+        }
+        if (!label) {
+            fprintf(stderr, "myne: warning: unresolved reference %s\n", reference->key);
+            add(&out, "??");
+        } else {
+            RefTarget *target = &ref_targets[label->target];
+            if (label->captured && !label->warned) {
+                fprintf(stderr, "myne: warning: reference %s uses a declaration inside a captured block; use @label for a stable name\n",
+                        reference->key);
+                label->warned = 1;
+            }
+            if (reference->link) {
+                add(&out, "<a href=\"");
+                escape(&out, target->slug);
+                add(&out, "#myne-target-");
+                char id[32];
+                snprintf(id, sizeof(id), "%d", label->target + 1);
+                add(&out, id);
+                add(&out, "\">");
+            }
+            if (reference->clever) {
+                escape(&out, target->kind);
+                ch(&out, ' ');
+            }
+            escape(&out, target->number);
+            if (reference->link) add(&out, "</a>");
+        }
+        cursor = end + 2;
+    }
+    add(&out, cursor);
+    free(body->s);
+    *body = out;
+}
+
 static Bib *bib_lookup(const char *key) {
     for (int i = 0; i < nbibs; i++) {
         if (!strcmp(bibs[i].key, key)) {
@@ -219,6 +344,34 @@ void escape_latex_text(Buf *b, const char *s) {
             i++;
         }
     }
+}
+
+/* Preserve ordinary title text while resolving references in headings and
+   navigation. Navigation labels render the number inside their existing link. */
+void escape_latex_refs(Buf *b, const char *s, int link) {
+    size_t n = strlen(s), start = 0;
+    for (size_t i = 0; i < n;) {
+        int clever = i + 5 <= n && !strncmp(s + i, "\\cref", 5);
+        int plain = i + 4 <= n && !strncmp(s + i, "\\ref", 4);
+        size_t name_end = i + (clever ? 5 : 4);
+        if (s[i] == '\\' && (i == 0 || s[i - 1] != '\\') && (clever || plain) &&
+            (name_end == n || !isalpha((unsigned char)s[name_end]))) {
+            size_t p = name_end;
+            char *arg = NULL;
+            if (arg_at(s, n, &p, &arg)) {
+                char *before = slice(s + start, i - start);
+                escape_latex_text(b, before);
+                free(before);
+                ref_placeholder(b, trim(arg), clever, link);
+                free(arg);
+                i = start = p;
+                continue;
+            }
+            free(arg);
+        }
+        i++;
+    }
+    escape_latex_text(b, s + start);
 }
 
 static char *slug(int id, const char *kind) {
@@ -594,6 +747,117 @@ static void cite_group_html(Buf *b, char *keys, int textual) {
     }
 }
 
+/* Return the kind and end offset for a list environment marker at offset i. */
+static int list_marker(const char *s, size_t n, size_t i, size_t *after, int *begin) {
+    static const char *starts[] = {"\\begin{itemize}", "\\begin{enumerate}"};
+    static const char *ends[] = {"\\end{itemize}", "\\end{enumerate}"};
+    for (int kind = 0; kind < 2; kind++) {
+        size_t len = strlen(starts[kind]);
+        if (i + len <= n && !memcmp(s + i, starts[kind], len)) {
+            *after = i + len;
+            *begin = 1;
+            return kind + 1;
+        }
+        len = strlen(ends[kind]);
+        if (i + len <= n && !memcmp(s + i, ends[kind], len)) {
+            *after = i + len;
+            *begin = 0;
+            return kind + 1;
+        }
+    }
+    return 0;
+}
+
+/* Find the matching end while accounting for nested itemize/enumerate lists. */
+static size_t list_end(const char *s, size_t n, size_t start, int outer_kind) {
+    int stack[64], depth = 1;
+    stack[0] = outer_kind;
+    for (size_t i = start; i < n;) {
+        if (s[i] == '%' && (i == 0 || s[i - 1] != '\\')) {
+            while (i < n && s[i] != '\n') {
+                i++;
+            }
+            continue;
+        }
+        size_t after;
+        int begin;
+        int kind = list_marker(s, n, i, &after, &begin);
+        if (!kind) {
+            i++;
+            continue;
+        }
+        if (begin) {
+            if (depth < (int)(sizeof(stack) / sizeof(stack[0]))) {
+                stack[depth++] = kind;
+            }
+        } else if (depth > 0 && stack[depth - 1] == kind) {
+            depth--;
+            if (!depth) {
+                return i;
+            }
+        }
+        i = after;
+    }
+    return n;
+}
+
+static void inline_html(Buf *b, const char *s, size_t n, int depth);
+
+/* Render list items separately so their inline content can use the normal
+   TeX/HTML conversion, including nested lists. */
+static void list_html(Buf *b, const char *s, size_t n, int kind, int depth) {
+    int stack[64], nested = 0, in_item = 0;
+    size_t item_start = 0;
+    stack[0] = kind;
+    add(b, kind == 1 ? "<ul>" : "<ol>");
+    for (size_t i = 0; i < n;) {
+        if (s[i] == '%' && (i == 0 || s[i - 1] != '\\')) {
+            while (i < n && s[i] != '\n') {
+                i++;
+            }
+            continue;
+        }
+        size_t after;
+        int begin;
+        int marker_kind = list_marker(s, n, i, &after, &begin);
+        if (marker_kind) {
+            if (begin) {
+                if (nested < (int)(sizeof(stack) / sizeof(stack[0])) - 1) {
+                    stack[++nested] = marker_kind;
+                }
+            } else if (nested > 0 && stack[nested] == marker_kind) {
+                nested--;
+            }
+            i = after;
+            continue;
+        }
+        if (!nested && i + 5 <= n && !memcmp(s + i, "\\item", 5) &&
+            (i + 5 == n || !isalpha((unsigned char)s[i + 5]))) {
+            if (in_item) {
+                inline_html(b, s + item_start, i - item_start, depth + 1);
+                add(b, "</li>");
+            }
+            in_item = 1;
+            i += 5;
+            while (i < n && (s[i] == ' ' || s[i] == '\t')) {
+                i++;
+            }
+            item_start = i;
+            add(b, "<li>");
+            continue;
+        }
+        i++;
+    }
+    if (in_item) {
+        inline_html(b, s + item_start, n - item_start, depth + 1);
+        add(b, "</li>");
+    } else {
+        /* Preserve any content in a malformed list without inventing items. */
+        inline_html(b, s, n, depth + 1);
+    }
+    add(b, kind == 1 ? "</ul>" : "</ol>");
+}
+
 /* Interpret the supported inline TeX commands and math delimiters. */
 static void inline_html(Buf *b, const char *s, size_t n, int depth) {
     if (depth > 16) {
@@ -661,7 +925,15 @@ static void inline_html(Buf *b, const char *s, size_t n, int depth) {
                 }
             }
             int has = arg_at(s, n, &p, &arg);
-            if (has && (!strcmp(cmd, "textit") || !strcmp(cmd, "textbf"))) {
+            if (has && !strcmp(cmd, "label")) {
+                if (current_ref_target >= 0) {
+                    add_ref_label(trim(arg), current_ref_target, 0);
+                } else {
+                    fprintf(stderr, "myne: warning: label %s has no numbered target\n", arg);
+                }
+            } else if (has && (!strcmp(cmd, "ref") || !strcmp(cmd, "cref"))) {
+                ref_placeholder(b, trim(arg), !strcmp(cmd, "cref"), 1);
+            } else if (has && (!strcmp(cmd, "textit") || !strcmp(cmd, "textbf"))) {
                 add(b, !strcmp(cmd, "textit") ? "<em>" : "<strong>");
                 inline_html(b, arg, strlen(arg), depth + 1);
                 add(b, !strcmp(cmd, "textit") ? "</em>" : "</strong>");
@@ -678,6 +950,17 @@ static void inline_html(Buf *b, const char *s, size_t n, int depth) {
                 add(&pages[current].notes, "<li>");
                 inline_html(&pages[current].notes, arg, strlen(arg), depth + 1);
                 add(&pages[current].notes, "</li>");
+            } else if (has && !strcmp(cmd, "begin") &&
+                       (!strcmp(arg, "itemize") || !strcmp(arg, "enumerate"))) {
+                int kind = !strcmp(arg, "itemize") ? 1 : 2;
+                const char *end = s + list_end(s, n, p, kind);
+                if (end == s + n) {
+                    die("unclosed %s environment", arg);
+                } else {
+                    list_html(b, s + p, end - (s + p), kind, depth);
+                    p = (size_t)(end - s) + strlen(kind == 1 ? "\\end{itemize}"
+                                                              : "\\end{enumerate}");
+                }
             } else if (has && !strcmp(cmd, "begin") && !strcmp(arg, "abstract")) {
                 const char *end = finds(s + p, n - p, "\\end{abstract}");
                 if (!end) {
@@ -856,6 +1139,15 @@ static void text_html(const char *s) {
                         number_heading(&number, type);
                         if (type >= 2 && type <= page_heading_level) {
                             new_page(arg, type, number.s);
+                            if (number.n) {
+                                int target = new_ref_target(number.s, heading_name(type));
+                                char anchor[64];
+                                snprintf(anchor, sizeof(anchor), "<span id=\"myne-target-%d\"></span>",
+                                         target + 1);
+                                add(&pages[current].body, anchor);
+                            } else {
+                                current_ref_target = -1;
+                            }
                         } else {
                             int toc_heading = web_table_of_contents &&
                                               type == pages[current].heading + 1;
@@ -880,11 +1172,18 @@ static void text_html(const char *s) {
                                     escape(&pages[current].toc, number.s);
                                     add(&pages[current].toc, "</span> ");
                                 }
-                                escape_latex_text(&pages[current].toc, arg);
+                                escape_latex_refs(&pages[current].toc, arg, 0);
                                 add(&pages[current].toc, "</a></li>");
                             } else {
                                 pages[current].toc_count--;
                                 snprintf(tag, sizeof(tag), "<h%d>", level);
+                            }
+                            int target = number.n ? new_ref_target(number.s, heading_name(type)) : -1;
+                            if (target >= 0) {
+                                char anchor[64];
+                                snprintf(anchor, sizeof(anchor), "<span id=\"myne-target-%d\"></span>",
+                                         target + 1);
+                                add(&pages[current].body, anchor);
                             }
                             add(&pages[current].body, tag);
                             if (number.n) {
@@ -1106,6 +1405,7 @@ static char *replace_map(const char *s) {
 }
 
 int render_html_document(void) {
+    reset_html_refs();
     new_page("Introduction", 0, NULL);
     int appendix_group_created = 0;
     int appendix_number = 0;
@@ -1122,12 +1422,47 @@ int render_html_document(void) {
                                   : is_theorem ? "Theorem"
                                                : "Code";
             const char *title = sep ? sep + 1 : heading;
+            Buf number = {0};
+            int target = -1;
+            if (is_def || is_lemma || is_theorem) {
+                next_statement_number(&number);
+                target = new_ref_target(number.s, heading);
+                add_ref_label(segs[i].label, target, 0);
+                add_ref_label(segs[i].raw_name, target, segs[i].capture);
+                int code_segment = -1;
+                for (int j = i + 1; j < nsegs && segs[j].kind != SEG_BOX_CLOSE; j++) {
+                    if (segs[j].kind == SEG_CODE) {
+                        code_segment = j;
+                        break;
+                    }
+                }
+                if (code_segment >= 0) {
+                    const char *source = segs[code_segment].s;
+                    size_t n = strlen(source);
+                    for (size_t line = 0; line < n;) {
+                        size_t end = line;
+                        while (end < n && source[end] != '\n') end++;
+                        char *name = lean_syntactic_name(source + line, end - line);
+                        if (name) {
+                            add_ref_label(name, target, segs[i].capture);
+                        }
+                        free(name);
+                        line = end < n ? end + 1 : end;
+                    }
+                }
+            } else {
+                current_ref_target = -1;
+            }
+            if (target >= 0) {
+                char anchor[64];
+                snprintf(anchor, sizeof(anchor), "<span id=\"myne-target-%d\"></span>",
+                         target + 1);
+                add(&pages[current].body, anchor);
+            }
             add(&pages[current].body, "<div class=\"lean-block ");
             addn(&pages[current].body, kind, kind_len);
             add(&pages[current].body, "\"><header>");
             if (is_def || is_lemma || is_theorem) {
-                Buf number = {0};
-                next_statement_number(&number);
                 add(&pages[current].body, "<span class=statement-label>");
                 add(&pages[current].body, heading);
                 ch(&pages[current].body, ' ');
@@ -1137,13 +1472,13 @@ int render_html_document(void) {
                                     !strncasecmp(title, kind, kind_len);
                 if (!default_title) {
                     add(&pages[current].body, "<span class=statement-title> — ");
-                    escape_latex_text(&pages[current].body, title);
+                    escape_latex_refs(&pages[current].body, title, 1);
                     add(&pages[current].body, "</span>");
                 }
-                free(number.s);
             } else {
-                escape_latex_text(&pages[current].body, title);
+                escape_latex_refs(&pages[current].body, title, 1);
             }
+            free(number.s);
             add(&pages[current].body, "</header><div class=\"lean-doc\">");
         } else if (segs[i].kind == SEG_CODE) {
             add(&pages[current].body, "</div>");
@@ -1211,5 +1546,10 @@ int render_html_document(void) {
         current = previous_page;
     }
     append_references();
+    for (int i = 0; i < npages; i++) {
+        resolve_ref_buffer(&pages[i].body);
+        resolve_ref_buffer(&pages[i].byline);
+        resolve_ref_buffer(&pages[i].notes);
+    }
     return failed ? -1 : 0;
 }

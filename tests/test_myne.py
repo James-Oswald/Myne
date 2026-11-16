@@ -184,6 +184,39 @@ class MyneTests(unittest.TestCase):
             self.assertNotIn('class=page-toc', (html_dir / "index.html").read_text())
             self.assertNotIn('class=page-toc', (html_dir / "section-001.html").read_text())
 
+    def test_latex_itemize_and_enumerate_render_as_html_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.tex"\nformat = "html"\n')
+            (base / "main.tex").write_text(
+                r"\begin{document}" "\n"
+                "Shopping:\n"
+                r"\begin{itemize}" "\n"
+                r"\item Apples and $x$" "\n"
+                r"\begin{enumerate}" "\n"
+                r"\item Gala" "\n"
+                r"\item Fuji" "\n"
+                r"\end{enumerate}" "\n"
+                r"\item \textbf{Bread}" "\n"
+                r"\end{itemize}" "\n"
+                r"Steps:" "\n"
+                r"\begin{enumerate}" "\n"
+                r"\item First" "\n"
+                r"\item Second" "\n"
+                r"\end{enumerate}" "\n"
+                r"\end{document}" "\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            html = (base / "out/html/index.html").read_text()
+            self.assertIn(
+                "<ul><li>Apples and <span class=math>$x$</span> <ol>"
+                "<li>Gala </li><li>Fuji </li></ol> </li>"
+                "<li><strong>Bread</strong> </li></ul>",
+                html,
+            )
+            self.assertIn("<ol><li>First </li><li>Second </li></ol>", html)
+
     def test_web_references_have_inline_numbers_math_and_title_links(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -725,7 +758,8 @@ assert.deepStrictEqual(mobileHidden(), [false,true,true,true,false]);
         self.assertIn("formal-measures literature", second_tex)
         third_tex = (project / "out/tex/Chapters/rpichap3.tex").read_text()
         self.assertIn("\\begin{definition}[Diagonal Halting Set]", third_tex)
-        self.assertNotIn("ProgrammingSystem.H", third_tex)
+        self.assertIn("\\label{ProgrammingSystem.H}", third_tex)
+        self.assertNotIn("def ProgrammingSystem.H", third_tex)
         self.assertTrue((project / "out/tex/thesis.cls").is_file())
         self.assertTrue((project / "out/tex/rpi_seal.png").is_file())
 
@@ -744,7 +778,8 @@ assert.deepStrictEqual(mobileHidden(), [false,true,true,true,false]);
         chapter_tex = (project / "out/tex/Chapters/Arithmetic.tex").read_text()
         self.assertEqual(chapter_tex.count("\\begin{definition}"), 1)
         self.assertEqual(chapter_tex.count("\\begin{theorem}"), 1)
-        self.assertNotIn("double_eq_add", chapter_tex)
+        self.assertIn("\\label{double_eq_add}", chapter_tex)
+        self.assertNotIn("theorem double_eq_add", chapter_tex)
         template = (project / "out/tex/template.tex").read_text()
         self.assertIn("\\bibliography{references}", template)
         self.assertIn("\\input{Chapters/Arithmetic.tex}", template)
@@ -854,6 +889,169 @@ assert.deepStrictEqual(mobileHidden(), [false,true,true,true,false]);
             )
             self.assertNotIn('</div> $$', html)
             self.assertNotIn('</div> $<span class=math>', html)
+
+    def test_annotated_proof_starts_on_new_line_without_formula(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\n')
+            (base / "main.lean").write_text(
+                "/-! # Proof Layout -/\n"
+                "/--\n"
+                "@nl\n"
+                "A theorem without a displayed formula.\n"
+                "@proof\n"
+                "Its proof starts on the next line.\n"
+                "-/\n"
+                "theorem proof_layout : True := by trivial\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            html = (base / "out/html/index.html").read_text()
+            self.assertIn(
+                "A theorem without a displayed formula. <br> <em>Proof.</em> "
+                "Its proof starts on the next line.",
+                html,
+            )
+
+    def test_labels_and_refs_for_lean_declarations_and_headings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\nformat = "both"\n')
+            (base / "main.lean").write_text(
+                "/-! # References\n"
+                "Forward \\ref{TM.Tape.NextInput_wf}, \\cref{proof:next}, "
+                "and \\ref{inline:short}.\n"
+                "## Results\n"
+                "\\label{sec:results}\n"
+                "-/\n"
+                "/--\n"
+                "@name Well-Foundedness\n"
+                "@nl\n"
+                "A short theorem. \\label{inline:short}\n"
+                "-/\n"
+                "theorem TM.Tape.NextInput_wf : True := by trivial\n\n"
+                "/--\n"
+                "@label proof:next\n"
+                "@nl\n"
+                "Another theorem.\n"
+                "-/\n"
+                "theorem another : True := by trivial\n\n"
+                "/-! See \\ref{sec:results}. -/\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("warning:", result.stderr)
+            index = (base / "out/html/index.html").read_text()
+            section = (base / "out/html/section-001.html").read_text()
+            self.assertIn('href="section-001.html#myne-target-2">1.1</a>', index)
+            self.assertIn('href="section-001.html#myne-target-3">Theorem 1.2</a>', index)
+            self.assertIn('href="section-001.html#myne-target-1">1</a>', section)
+            self.assertIn('id="myne-target-2"', section)
+            tex = (base / "out/tex/main.tex").read_text()
+            self.assertIn(r"\label{TM.Tape.NextInput_wf}", tex)
+            self.assertIn(r"\label{proof:next}", tex)
+            self.assertIn(r"\usepackage{cleveref}", tex)
+
+    def test_captured_block_references_any_declaration_name_with_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\nformat = "both"\n')
+            (base / "main.lean").write_text(
+                "/-! # Captured References\n"
+                "See \\ref{second}.\n"
+                "-/\n"
+                "/--\n"
+                "@name A captured pair\n"
+                "@capture block\n"
+                "@nl\n"
+                "Two definitions.\n"
+                "-/\n"
+                "def first : Nat := 1\n\n"
+                "def second : Nat := 2\n"
+                "--myne:end\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("declaration inside a captured block", result.stderr)
+            html = (base / "out/html/index.html").read_text()
+            self.assertIn('href="index.html#myne-target-1">1</a>', html)
+            tex = (base / "out/tex/main.tex").read_text()
+            self.assertIn(r"\label{first}", tex)
+            self.assertIn(r"\label{second}", tex)
+            tex_only = run("-f", "tex", cwd=base)
+            self.assertEqual(tex_only.returncode, 0, tex_only.stderr)
+            self.assertIn("declaration inside a captured block", tex_only.stderr)
+
+    def test_latex_section_label_and_forward_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.tex"\nformat = "both"\n')
+            (base / "main.tex").write_text(
+                "\\documentclass{article}\n"
+                "\\begin{document}\n"
+                "See \\ref{sec:later} and \\cref{sec:later}.\n"
+                "\\section{Later}\\label{sec:later}\n"
+                "\\end{document}\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            index = (base / "out/html/index.html").read_text()
+            self.assertIn('href="section-001.html#myne-target-1">1</a>', index)
+            self.assertIn('href="section-001.html#myne-target-1">section 1</a>', index)
+            tex = (base / "out/tex/main.tex").read_text()
+            self.assertIn(r"\usepackage{cleveref}", tex)
+
+    def test_cref_to_included_lean_declaration_loads_package_in_tex_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.tex"\nformat = "both"\n')
+            (base / "main.tex").write_text(
+                "\\documentclass{article}\n"
+                "\\begin{document}\n"
+                "See \\cref{included_result}.\n"
+                "\\input{chapter.lean}\n"
+                "\\end{document}\n"
+            )
+            (base / "chapter.lean").write_text(
+                "/-- @nl\nAn included result.\n-/\n"
+                "theorem included_result : True := by trivial\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            html = (base / "out/html/index.html").read_text()
+            self.assertIn('href="index.html#myne-target-1">Theorem 1</a>', html)
+            self.assertIn(r"\usepackage{cleveref}", (base / "out/tex/main.tex").read_text())
+            self.assertIn(r"\label{included_result}",
+                          (base / "out/tex/chapter.tex").read_text())
+
+    def test_refs_in_page_and_block_titles_are_hyperlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\nformat = "html"\n')
+            (base / "main.lean").write_text(
+                "/-! # References\n"
+                "## Consequence of \\cref{late}\n"
+                "-/\n"
+                "/-- @name Earlier than \\ref{late}\n"
+                "@nl\nThe first theorem.\n-/\n"
+                "theorem early : True := by trivial\n\n"
+                "/-- @label late\n@nl\nThe second theorem.\n-/\n"
+                "theorem later : True := by trivial\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            section = (base / "out/html/section-001.html").read_text()
+            self.assertIn(
+                '<h1><span class=heading-number>1</span> Consequence of '
+                '<a href="section-001.html#myne-target-3">Theorem 1.2</a></h1>',
+                section,
+            )
+            self.assertIn(
+                '<span class=statement-title> — Earlier than '
+                '<a href="section-001.html#myne-target-3">1.2</a></span>',
+                section,
+            )
+            self.assertNotIn("@@MYNE_REF_", section)
 
     def test_web_page_heading_and_dark_mode_options(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
