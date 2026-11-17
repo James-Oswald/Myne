@@ -183,8 +183,10 @@ pre {
     background: #f7f9fb;
 }
 
-.lean-block.theorem, .lean-block.lemma { border-left: 4px solid #8b4050; }
-.lean-block.def { border-left: 4px solid #397356; }
+.lean-block.def { border-left: 4px solid #0284c7; }
+.lean-block.lemma { border-left: 4px solid #15803d; }
+.lean-block.theorem { border-left: 4px solid #7c3aed; }
+.lean-block.corollary { border-left: 4px solid #e11d48; }
 body[data-style=plain] .lean-block.def {
     background: #e5f4ff;
     border-color: #0284c7;
@@ -194,13 +196,29 @@ body[data-style=plain] .lean-block.def header {
     border-color: #7dd3fc;
     color: #075985;
 }
-body[data-style=plain] .lean-block.theorem,
 body[data-style=plain] .lean-block.lemma {
+    background: #dcfce7;
+    border-color: #15803d;
+}
+body[data-style=plain] .lean-block.lemma header {
+    background: #bbf7d0;
+    border-color: #86efac;
+    color: #166534;
+}
+body[data-style=plain] .lean-block.theorem {
+    background: #f4efff;
+    border-color: #7c3aed;
+}
+body[data-style=plain] .lean-block.theorem header {
+    background: #e9ddff;
+    border-color: #c4b5fd;
+    color: #5b21b6;
+}
+body[data-style=plain] .lean-block.corollary {
     background: #fff0f3;
     border-color: #e11d48;
 }
-body[data-style=plain] .lean-block.theorem header,
-body[data-style=plain] .lean-block.lemma header {
+body[data-style=plain] .lean-block.corollary header {
     background: #ffd6e0;
     border-color: #fda4af;
     color: #9f1239;
@@ -255,9 +273,10 @@ body[data-graph-page] .site-header { flex: 0 0 auto; }
 .graph-layout-label select { border: 1px solid #aeb8c4; border-radius: 0.35rem; padding: 0.4rem 0.55rem; color: inherit; background: #f8fafc; font: inherit; }
 .graph-legend { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; margin-left: auto; font: 0.9rem system-ui, sans-serif; }
 .graph-legend i { width: 0.8rem; height: 0.8rem; border: 1px solid; border-radius: 0.2rem; }
-.legend-definition { background: #dbeafe; border-color: #2563eb !important; }
-.legend-lemma { background: #dcfce7; border-color: #16a34a !important; }
-.legend-theorem { background: #fef3c7; border-color: #d97706 !important; }
+.legend-definition { background: #e5f4ff; border-color: #0284c7 !important; }
+.legend-lemma { background: #dcfce7; border-color: #15803d !important; }
+.legend-theorem { background: #f4efff; border-color: #7c3aed !important; }
+.legend-corollary { background: #fff0f3; border-color: #e11d48 !important; }
 .dependency-scroll { flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid #c6d1dd; border-radius: 0.6rem; background: #f8fbff; }
 .dependency-graph { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; cursor: grab; }
 .dependency-edge { fill: none; stroke: #718096; stroke-width: 1.7; opacity: 0.8; vector-effect: non-scaling-stroke; pointer-events: none; }
@@ -267,17 +286,20 @@ body[data-graph-page] .site-header { flex: 0 0 auto; }
 .dependency-link[data-dragging="1"] .dependency-node { cursor: grabbing; }
 .dependency-graph[data-panning="1"] { cursor: grabbing; }
 .dependency-node rect { stroke-width: 1.8; vector-effect: non-scaling-stroke; }
-.dependency-definition rect { fill: #dbeafe; stroke: #1d4ed8; }
+.dependency-definition rect { fill: #e5f4ff; stroke: #0284c7; }
 .dependency-lemma rect { fill: #dcfce7; stroke: #15803d; }
-.dependency-theorem rect { fill: #fef3c7; stroke: #b45309; }
+.dependency-theorem rect { fill: #f4efff; stroke: #7c3aed; }
+.dependency-corollary rect { fill: #fff0f3; stroke: #e11d48; }
 .dependency-link:hover .dependency-node rect,
 .dependency-link:focus .dependency-node rect { stroke-width: 3; }
 .dependency-link:hover .dependency-definition rect,
-.dependency-link:focus .dependency-definition rect { fill: #bfdbfe; }
+.dependency-link:focus .dependency-definition rect { fill: #cbeaff; }
 .dependency-link:hover .dependency-lemma rect,
 .dependency-link:focus .dependency-lemma rect { fill: #bbf7d0; }
 .dependency-link:hover .dependency-theorem rect,
-.dependency-link:focus .dependency-theorem rect { fill: #fde68a; }
+.dependency-link:focus .dependency-theorem rect { fill: #e9ddff; }
+.dependency-link:hover .dependency-corollary rect,
+.dependency-link:focus .dependency-corollary rect { fill: #ffd6e0; }
 .dependency-name { fill: #17212b; text-anchor: middle; font: 600 14px system-ui, sans-serif; }
 .dependency-kind { fill: #3d4c5f; text-anchor: middle; font: 11px system-ui, sans-serif; }
 .dependency-link:focus { outline: none; }
@@ -302,7 +324,8 @@ body[data-style=verso] .lean-code { background: #fcf8f1; }
 body[data-style=hutter] { background: #fafafa; }
 body[data-style=hutter] .lean-block.def { background: #eef8ee; border: 2px solid #54895a; }
 body[data-style=hutter] .lean-block.theorem,
-body[data-style=hutter] .lean-block.lemma { background: #fff0f0; border: 2px solid #b76565; }
+body[data-style=hutter] .lean-block.lemma,
+body[data-style=hutter] .lean-block.corollary { background: #fff0f0; border: 2px solid #b76565; }
 body[data-style=hutter] .lean-block header,
 body[data-style=hutter] .lean-code { background: transparent; }
 
@@ -345,9 +368,14 @@ body[data-style=hutter] .lean-code { background: transparent; }
 :root[data-theme=dark] .dependency-arrow { fill: #a8b5c3; }
 :root[data-theme=dark] .dependency-toolbar button { background: #202a35; border-color: #526172; }
 :root[data-theme=dark] .dependency-toolbar button:hover { background: #303c49; }
-:root[data-theme=dark] .dependency-definition rect { fill: #1e3a5f; stroke: #60a5fa; }
-:root[data-theme=dark] .dependency-lemma rect { fill: #17432a; stroke: #4ade80; }
-:root[data-theme=dark] .dependency-theorem rect { fill: #4a3513; stroke: #fbbf24; }
+:root[data-theme=dark] .dependency-definition rect { fill: #112a3a; stroke: #38bdf8; }
+:root[data-theme=dark] .dependency-lemma rect { fill: #12382c; stroke: #4ade80; }
+:root[data-theme=dark] .dependency-theorem rect { fill: #2e1b47; stroke: #a78bfa; }
+:root[data-theme=dark] .dependency-corollary rect { fill: #351c2a; stroke: #fb7185; }
+:root[data-theme=dark] .legend-definition { background: #112a3a; border-color: #38bdf8 !important; }
+:root[data-theme=dark] .legend-lemma { background: #12382c; border-color: #4ade80 !important; }
+:root[data-theme=dark] .legend-theorem { background: #2e1b47; border-color: #a78bfa !important; }
+:root[data-theme=dark] .legend-corollary { background: #351c2a; border-color: #fb7185 !important; }
 :root[data-theme=dark] .dependency-link:hover .dependency-node rect,
 :root[data-theme=dark] .dependency-link:focus .dependency-node rect { filter: brightness(1.25); }
 :root[data-theme=dark] .dependency-name { fill: #e5e9ef; }
@@ -384,13 +412,29 @@ body[data-style=hutter] .lean-code { background: transparent; }
     border-color: #256385;
     color: #bae6fd;
 }
-:root[data-theme=dark] body[data-style=plain] .lean-block.theorem,
 :root[data-theme=dark] body[data-style=plain] .lean-block.lemma {
+    background: #12382c;
+    border-color: #4ade80;
+}
+:root[data-theme=dark] body[data-style=plain] .lean-block.lemma header {
+    background: #1c4a38;
+    border-color: #2f7650;
+    color: #bbf7d0;
+}
+:root[data-theme=dark] body[data-style=plain] .lean-block.theorem {
+    background: #2e1b47;
+    border-color: #a78bfa;
+}
+:root[data-theme=dark] body[data-style=plain] .lean-block.theorem header {
+    background: #432761;
+    border-color: #6d4590;
+    color: #ddd6fe;
+}
+:root[data-theme=dark] body[data-style=plain] .lean-block.corollary {
     background: #351c2a;
     border-color: #fb7185;
 }
-:root[data-theme=dark] body[data-style=plain] .lean-block.theorem header,
-:root[data-theme=dark] body[data-style=plain] .lean-block.lemma header {
+:root[data-theme=dark] body[data-style=plain] .lean-block.corollary header {
     background: #4a2437;
     border-color: #8a3652;
     color: #fecdd3;
@@ -400,7 +444,8 @@ body[data-style=hutter] .lean-code { background: transparent; }
     border-color: #68a873;
 }
 :root[data-theme=dark] body[data-style=hutter] .lean-block.theorem,
-:root[data-theme=dark] body[data-style=hutter] .lean-block.lemma {
+:root[data-theme=dark] body[data-style=hutter] .lean-block.lemma,
+:root[data-theme=dark] body[data-style=hutter] .lean-block.corollary {
     background: #2b191d;
     border-color: #c87878;
 }
@@ -450,12 +495,14 @@ body[data-style=hutter] .lean-code { background: transparent; }
 .dependency-arrow, .dependency-arrow-highlight { stroke: none; }
 
 /* Keep declaration kinds distinct while selected or highlighted as dependencies. */
-.dependency-definition { --highlight-fill: #cffafe; --highlight-stroke: #0891b2; --highlight-glow: #06b6d4aa; --highlight-text: #083344; --highlight-kind: #155e75; }
+.dependency-definition { --highlight-fill: #cbeaff; --highlight-stroke: #0284c7; --highlight-glow: #38bdf8aa; --highlight-text: #083344; --highlight-kind: #075985; }
 .dependency-lemma { --highlight-fill: #bbf7d0; --highlight-stroke: #15803d; --highlight-glow: #22c55eaa; --highlight-text: #052e16; --highlight-kind: #166534; }
-.dependency-theorem { --highlight-fill: #fde68a; --highlight-stroke: #b45309; --highlight-glow: #f59e0baa; --highlight-text: #451a03; --highlight-kind: #92400e; }
-:root[data-theme=dark] .dependency-definition { --highlight-fill: #164e63; --highlight-stroke: #67e8f9; --highlight-glow: #22d3eeaa; --highlight-text: #ecfeff; --highlight-kind: #a5f3fc; }
-:root[data-theme=dark] .dependency-lemma { --highlight-fill: #14532d; --highlight-stroke: #86efac; --highlight-glow: #4ade80aa; --highlight-text: #f0fdf4; --highlight-kind: #bbf7d0; }
-:root[data-theme=dark] .dependency-theorem { --highlight-fill: #78350f; --highlight-stroke: #fcd34d; --highlight-glow: #fbbf24aa; --highlight-text: #fffbeb; --highlight-kind: #fde68a; }
+.dependency-theorem { --highlight-fill: #e9ddff; --highlight-stroke: #7c3aed; --highlight-glow: #8b5cf6aa; --highlight-text: #2e1065; --highlight-kind: #5b21b6; }
+.dependency-corollary { --highlight-fill: #ffd6e0; --highlight-stroke: #e11d48; --highlight-glow: #fb7185aa; --highlight-text: #4c0519; --highlight-kind: #9f1239; }
+:root[data-theme=dark] .dependency-definition { --highlight-fill: #163b52; --highlight-stroke: #38bdf8; --highlight-glow: #38bdf8aa; --highlight-text: #ecfeff; --highlight-kind: #bae6fd; }
+:root[data-theme=dark] .dependency-lemma { --highlight-fill: #1c4a38; --highlight-stroke: #4ade80; --highlight-glow: #4ade80aa; --highlight-text: #f0fdf4; --highlight-kind: #bbf7d0; }
+:root[data-theme=dark] .dependency-theorem { --highlight-fill: #432761; --highlight-stroke: #a78bfa; --highlight-glow: #a78bfaaa; --highlight-text: #f5f3ff; --highlight-kind: #ddd6fe; }
+:root[data-theme=dark] .dependency-corollary { --highlight-fill: #4a2437; --highlight-stroke: #fb7185; --highlight-glow: #fb7185aa; --highlight-text: #fff1f2; --highlight-kind: #fecdd3; }
 .dependency-link:is(.is-dependency, .is-active) .dependency-node rect { fill: var(--highlight-fill); stroke: var(--highlight-stroke); stroke-width: 4.5; filter: drop-shadow(0 0 5px var(--highlight-glow)); }
 .dependency-link.is-active .dependency-node rect { stroke-width: 5.5; }
 .dependency-link:is(.is-dependency, .is-active) .dependency-name { fill: var(--highlight-text); font-weight: 800; }

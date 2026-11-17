@@ -876,7 +876,11 @@ assert.deepStrictEqual(mobileHidden(), [false,true,true,true,false]);
             result = run(cwd=base)
             self.assertEqual(result.returncode, 0, result.stderr)
             html = (base / "out/html/index.html").read_text()
-            self.assertIn('<div class=math>$$x = y$$</div>', html)
+            self.assertIn(
+                'A theorem with a displayed formula. <div class=math>$$x = y$$</div> '
+                '<em>Proof.</em> Construct',
+                html,
+            )
             self.assertIn(
                 "<span class=statement-label>Theorem 1</span>"
                 "<span class=statement-title> — Delimiter Regression</span>",
@@ -912,6 +916,61 @@ assert.deepStrictEqual(mobileHidden(), [false,true,true,true,false]);
                 "Its proof starts on the next line.",
                 html,
             )
+
+    def test_proof_preserves_lemma_and_type_overrides_statement_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\nformat = "both"\n')
+            (base / "main.lean").write_text(
+                "/-! # Statement Types -/\n"
+                "/-- @name Proven lemma\n@formula\n$$P$$\n@proof\nA proof. -/\n"
+                "lemma proven_lemma : True := by trivial\n\n"
+                "/-- @name Forced lemma\n@type lemma\n@proof\nAnother proof. -/\n"
+                "theorem forced_lemma : True := by trivial\n\n"
+                "/-- @name Forced theorem\n@type theorem\n@nl\nA statement. -/\n"
+                "lemma forced_theorem : True := by trivial\n\n"
+                "/-- @name Forced definition\n@type def\n@nl\nA definition.\n"
+                "@proof\nIts derivation. -/\n"
+                "theorem forced_def : True := by trivial\n\n"
+                "/-- @name Forced corollary\n@type corollary\n@proof\nA proof. -/\n"
+                "theorem forced_corollary : True := by trivial\n\n"
+                "/-- @name Unknown declaration\n@proof\nA proof. -/\n"
+                "axiom unknown_declaration : True\n"
+            )
+            result = run(cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            html = (base / "out/html/index.html").read_text()
+            tex = (base / "out/tex/main.tex").read_text()
+            graph = (base / "out/html/dependencies.html").read_text()
+            for kind, number, title in (
+                ("Lemma", 1, "Proven lemma"),
+                ("Lemma", 2, "Forced lemma"),
+                ("Theorem", 3, "Forced theorem"),
+                ("Definition", 4, "Forced definition"),
+                ("Corollary", 5, "Forced corollary"),
+                ("Theorem", 6, "Unknown declaration"),
+            ):
+                self.assertIn(f"{kind} {number}</span><span class=statement-title> — {title}", html)
+                self.assertIn(f"\\begin{{{kind.lower()}}}[{title}]", tex)
+            self.assertIn("dependency-corollary", graph)
+            self.assertIn("<text class=dependency-kind x=\"0\" y=\"17\">corollary</text>", graph)
+            self.assertIn("<em>Proof.</em> Its derivation.", html)
+            self.assertIn("\\begin{proof}\nIts derivation.", tex)
+            self.assertNotIn("@type", html)
+
+    def test_type_rejects_invalid_and_duplicate_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\n')
+            source = base / "main.lean"
+            for annotation, message in (
+                ("@type proposition", "@type must be def, theorem, lemma, or corollary"),
+                ("@type lemma\n@type theorem", "duplicate @type annotation"),
+            ):
+                source.write_text(f"/-! # Types -/\n/-- {annotation} -/\nlemma example : True := by trivial\n")
+                result = run(cwd=base)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
 
     def test_labels_and_refs_for_lean_declarations_and_headings(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

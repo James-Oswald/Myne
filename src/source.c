@@ -74,8 +74,8 @@ static int lean_kind(const char *s, size_t n) {
             return LEAN_DEF;
         }
     }
-    const char *propositions[] = {"lemma", "theorem"};
-    for (int kind = LEAN_LEMMA; kind <= LEAN_THEOREM; kind++) {
+    const char *propositions[] = {"lemma", "theorem", "corollary"};
+    for (int kind = LEAN_LEMMA; kind <= LEAN_COROLLARY; kind++) {
         size_t len = strlen(propositions[kind - LEAN_LEMMA]);
         if (i + len <= n && !memcmp(s + i, propositions[kind - LEAN_LEMMA], len) &&
             (i + len == n || isspace((unsigned char)s[i + len]))) {
@@ -86,18 +86,18 @@ static int lean_kind(const char *s, size_t n) {
 }
 
 static const char *lean_kind_name(int kind) {
-    const char *names[] = {"code", "def", "lemma", "theorem"};
+    const char *names[] = {"code", "def", "lemma", "theorem", "corollary"};
     return names[kind];
 }
 
 static const char *lean_environment(int kind) {
-    const char *names[] = {NULL, "definition", "lemma", "theorem"};
+    const char *names[] = {NULL, "definition", "lemma", "theorem", "corollary"};
     return names[kind];
 }
 
 typedef struct {
     Buf name, label, nl, formula, proof, plain;
-    int annotated, capture;
+    int annotated, capture, type;
 } LeanDoc;
 
 static void lean_doc_free(LeanDoc *doc) {
@@ -138,6 +138,7 @@ static int lean_doc_tag(const char *s, size_t n, const char **tag, size_t *tag_l
           (len == 2 && !memcmp(s + begin, "nl", 2)) ||
           (len == 7 && !memcmp(s + begin, "formula", 7)) ||
           (len == 5 && !memcmp(s + begin, "proof", 5)) ||
+          (len == 4 && !memcmp(s + begin, "type", 4)) ||
           (len == 7 && !memcmp(s + begin, "capture", 7)))) {
         return 0;
     }
@@ -188,7 +189,27 @@ static LeanDoc lean_doc_parse(const char *s, size_t n) {
         size_t tag_len = 0, value_start = 0;
         if (lean_doc_tag(s + i, end - i, &tag, &tag_len, &value_start)) {
             doc.annotated = 1;
-            if (tag_len == 7 && !memcmp(tag, "capture", 7)) {
+            if (tag_len == 4 && !memcmp(tag, "type", 4)) {
+                const char *value = s + i + value_start;
+                size_t value_len = end - i - value_start;
+                while (value_len && isspace((unsigned char)value[value_len - 1])) {
+                    value_len--;
+                }
+                if (doc.type) {
+                    die("duplicate @type annotation");
+                } else if (value_len == 3 && !memcmp(value, "def", 3)) {
+                    doc.type = LEAN_DEF;
+                } else if (value_len == 5 && !memcmp(value, "lemma", 5)) {
+                    doc.type = LEAN_LEMMA;
+                } else if (value_len == 7 && !memcmp(value, "theorem", 7)) {
+                    doc.type = LEAN_THEOREM;
+                } else if (value_len == 9 && !memcmp(value, "corollary", 9)) {
+                    doc.type = LEAN_COROLLARY;
+                } else {
+                    die("@type must be def, theorem, lemma, or corollary");
+                }
+                field = NULL;
+            } else if (tag_len == 7 && !memcmp(tag, "capture", 7)) {
                 const char *value = s + i + value_start;
                 size_t value_len = end - i - value_start;
                 while (value_len && isspace((unsigned char)value[value_len - 1])) {
@@ -221,7 +242,15 @@ static LeanDoc lean_doc_parse(const char *s, size_t n) {
     return doc;
 }
 
-static void lean_doc_body(Buf *b, LeanDoc *doc, int kind, int for_tex) {
+static int lean_doc_kind(const LeanDoc *doc, const char *code, size_t n) {
+    int kind = lean_kind(code, n);
+    if (doc->type) {
+        return doc->type;
+    }
+    return kind == LEAN_CODE && doc->proof.n ? LEAN_THEOREM : kind;
+}
+
+static void lean_doc_body(Buf *b, LeanDoc *doc, int for_tex) {
     Buf *natural = doc->nl.n ? &doc->nl : &doc->plain;
     if (natural->n) {
         addn(b, natural->s, natural->n);
@@ -231,7 +260,9 @@ static void lean_doc_body(Buf *b, LeanDoc *doc, int kind, int for_tex) {
         if (b->n && b->s[b->n - 1] != '\n') {
             ch(b, '\n');
         }
-        ch(b, '\n');
+        if (for_tex) {
+            ch(b, '\n');
+        }
         if (formula_len < 2 || strncmp(doc->formula.s, "$$", 2)) {
             add(b, "$$");
         }
@@ -239,15 +270,16 @@ static void lean_doc_body(Buf *b, LeanDoc *doc, int kind, int for_tex) {
         if (formula_len < 2 || strncmp(doc->formula.s + formula_len - 2, "$$", 2)) {
             add(b, "$$");
         }
-        add(b, "\n\n");
+        add(b, for_tex ? "\n\n" : "\n");
     }
-    if (doc->proof.n && (kind == LEAN_LEMMA || kind == LEAN_THEOREM)) {
+    if (doc->proof.n) {
         if (for_tex) {
             add(b, "\\begin{proof}\n");
         } else {
-            /* HTML rendering collapses source newlines, so force the proof
-               label onto a fresh visual line. */
-            add(b, "\\\\\n");
+            /* A display formula already puts the proof on a new line. */
+            if (!doc->formula.n) {
+                add(b, "\\\\\n");
+            }
             add(b, "\\textit{Proof.} ");
         }
         addn(b, doc->proof.s, doc->proof.n);
@@ -328,6 +360,7 @@ static void segment(int kind, const char *s, size_t n) {
     target[*count].label = NULL;
     target[*count].file = -1;
     target[*count].capture = 0;
+    target[*count].declaration_kind = LEAN_CODE;
     target[(*count)++].s = slice(s, n);
 }
 
@@ -574,10 +607,7 @@ void flatten(int id, int depth) {
             code_end = boundary.end;
             resume = boundary.next;
             if (code_end > begin) {
-                int declaration = lean_kind(s + begin, code_end - begin);
-                if (doc.proof.n) {
-                    declaration = LEAN_THEOREM;
-                }
+                int declaration = lean_doc_kind(&doc, s + begin, code_end - begin);
                 const char *kind_name = lean_kind_name(declaration);
                 Buf label = {0};
                 add(&label, kind_name);
@@ -598,7 +628,7 @@ void flatten(int id, int depth) {
                 free(label.s);
                 Buf body = {0};
                 if (doc.annotated) {
-                    lean_doc_body(&body, &doc, declaration, 0);
+                    lean_doc_body(&body, &doc, 0);
                 } else {
                     addn(&body, s + start, j - start);
                 }
@@ -608,6 +638,7 @@ void flatten(int id, int depth) {
                 Segment *code = appendix_capture ? &appendix_segs[nappendix_segs - 1]
                                                  : &segs[nsegs - 1];
                 code->file = id;
+                code->declaration_kind = declaration;
                 code->doc_name = hover_name;
                 code->doc_nl = hover_nl;
                 code->doc_formula = hover_formula;
@@ -993,10 +1024,7 @@ static void translate_lean(File *f, int isroot) {
             LeanCodeEnd boundary = lean_code_end(s, n, i, doc.capture, f->rel);
             i = boundary.next;
             if (boundary.end > begin) {
-                int declaration = lean_kind(s + begin, boundary.end - begin);
-                if (doc.proof.n) {
-                    declaration = LEAN_THEOREM;
-                }
+                int declaration = lean_doc_kind(&doc, s + begin, boundary.end - begin);
                 const char *environment = lean_environment(declaration);
                 if (environment) {
                     add(out, "\n\\begin{");
@@ -1014,7 +1042,7 @@ static void translate_lean(File *f, int isroot) {
                 }
                 if (doc.annotated) {
                     Buf body = {0};
-                    lean_doc_body(&body, &doc, declaration, 1);
+                    lean_doc_body(&body, &doc, 1);
                     markdown_tex(out, body.s ? body.s : "", body.n, isroot, &top_heading_seen,
                                  &math_mode);
                     free(body.s);

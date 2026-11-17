@@ -69,6 +69,7 @@ static int dependency_declaration(const char *s, size_t begin, size_t end, size_
     }
     if ((cmd_len == 5 && !memcmp(s + cmd, "lemma", 5))) declaration_kind = LEAN_LEMMA;
     if ((cmd_len == 7 && !memcmp(s + cmd, "theorem", 7))) declaration_kind = LEAN_THEOREM;
+    if ((cmd_len == 9 && !memcmp(s + cmd, "corollary", 9))) declaration_kind = LEAN_COROLLARY;
     if ((cmd_len == 8 && !memcmp(s + cmd, "instance", 8))) declaration_kind = LEAN_THEOREM;
     if (declaration_kind == LEAN_CODE || (p < end && !isspace((unsigned char)s[p]))) {
         return 0;
@@ -108,6 +109,7 @@ static void dependency_collect_code(const char *source, int segment) {
     while (isspace((unsigned char)*source)) source++;
     size_t n = strlen(source), current_start = 0;
     int current_node = -1;
+    int first_declaration = 1;
     for (size_t line = 0; line < n;) {
         size_t end = line;
         while (end < n && source[end] != '\n') end++;
@@ -130,7 +132,9 @@ static void dependency_collect_code(const char *source, int segment) {
             node->doc_name = segs[segment].doc_name ? xstrdup(segs[segment].doc_name) : NULL;
             node->doc_nl = segs[segment].doc_nl ? xstrdup(segs[segment].doc_nl) : NULL;
             node->doc_formula = segs[segment].doc_formula ? xstrdup(segs[segment].doc_formula) : NULL;
-            node->kind = kind;
+            node->kind = first_declaration && segs[segment].declaration_kind != LEAN_CODE
+                             ? segs[segment].declaration_kind : kind;
+            first_declaration = 0;
             node->segment = segment;
             node->page = -1;
             node->offset = keyword;

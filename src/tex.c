@@ -153,6 +153,7 @@ static void theorem_setup(Buf *b) {
            "\\theoremstyle{plain}\n"
            "\\@ifundefined{theorem}{\\newtheorem{theorem}{Theorem}}{}\n"
            "\\@ifundefined{lemma}{\\newtheorem{lemma}{Lemma}}{}\n"
+           "\\@ifundefined{corollary}{\\newtheorem{corollary}{Corollary}}{}\n"
            "\\theoremstyle{definition}\n"
            "\\@ifundefined{definition}{\\newtheorem{definition}{Definition}}{}\n"
            "\\makeatother\n");

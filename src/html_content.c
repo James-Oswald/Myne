@@ -1417,14 +1417,16 @@ int render_html_document(void) {
             int is_def = kind_len == 3 && !memcmp(kind, "def", 3);
             int is_lemma = kind_len == 5 && !memcmp(kind, "lemma", 5);
             int is_theorem = kind_len == 7 && !memcmp(kind, "theorem", 7);
+            int is_corollary = kind_len == 9 && !memcmp(kind, "corollary", 9);
             const char *heading = is_def       ? "Definition"
                                   : is_lemma   ? "Lemma"
                                   : is_theorem ? "Theorem"
+                                  : is_corollary ? "Corollary"
                                                : "Code";
             const char *title = sep ? sep + 1 : heading;
             Buf number = {0};
             int target = -1;
-            if (is_def || is_lemma || is_theorem) {
+            if (is_def || is_lemma || is_theorem || is_corollary) {
                 next_statement_number(&number);
                 target = new_ref_target(number.s, heading);
                 add_ref_label(segs[i].label, target, 0);
@@ -1462,7 +1464,7 @@ int render_html_document(void) {
             add(&pages[current].body, "<div class=\"lean-block ");
             addn(&pages[current].body, kind, kind_len);
             add(&pages[current].body, "\"><header>");
-            if (is_def || is_lemma || is_theorem) {
+            if (is_def || is_lemma || is_theorem || is_corollary) {
                 add(&pages[current].body, "<span class=statement-label>");
                 add(&pages[current].body, heading);
                 ch(&pages[current].body, ' ');

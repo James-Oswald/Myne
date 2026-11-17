@@ -211,7 +211,8 @@ static void dependency_graph_html(const char *dir) {
                "</label><button type=button "
                "data-graph-action=direction>Top to bottom</button><span class=graph-legend>"
                "<i class=legend-definition></i> Definitions <i class=legend-lemma></i> Lemmas "
-               "<i class=legend-theorem></i> Theorems</span></div><div "
+               "<i class=legend-theorem></i> Theorems <i class=legend-corollary></i> "
+               "Corollaries</span></div><div "
                "class=dependency-scroll><svg class=dependency-graph role=img aria-label=\"Lean "
                "declaration dependency graph\" viewBox=\"0 0 1200 800\"><defs><marker id=\"dep-arrow\" "
                "markerUnits=\"userSpaceOnUse\" viewBox=\"0 0 8 8\" markerWidth=\"10\" markerHeight=\"10\" "
@@ -258,7 +259,8 @@ static void dependency_graph_html(const char *dir) {
         escape(&html, node->doc_formula ? node->doc_formula : "");
         add(&html, "\"><g class=\"dependency-node ");
         add(&html, node->kind == LEAN_DEF ? "dependency-definition" :
-                    node->kind == LEAN_LEMMA ? "dependency-lemma" : "dependency-theorem");
+                    node->kind == LEAN_LEMMA ? "dependency-lemma" :
+                    node->kind == LEAN_COROLLARY ? "dependency-corollary" : "dependency-theorem");
         add(&html, "\" data-width=\"");
         snprintf(dims, sizeof(dims), "%d\" data-index=\"%d", width, i);
         add(&html, dims);
@@ -269,7 +271,8 @@ static void dependency_graph_html(const char *dir) {
         escape(&html, node->name);
         add(&html, "</text><text class=dependency-kind x=\"0\" y=\"17\">");
         add(&html, node->kind == LEAN_DEF ? "definition"
-                    : node->kind == LEAN_LEMMA ? "lemma" : "theorem");
+                    : node->kind == LEAN_LEMMA ? "lemma"
+                    : node->kind == LEAN_COROLLARY ? "corollary" : "theorem");
         add(&html, "</text></g></a>");
     }
     add(&html, "</g></svg></div><div class=dependency-tooltip role=tooltip hidden></div></main></body></html>\n");

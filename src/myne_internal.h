@@ -66,7 +66,7 @@ char *myne_realpath(const char *path, char *resolved);
 
 enum { SEG_TEXT, SEG_CODE, SEG_BOX_OPEN, SEG_BOX_CLOSE, SEG_APPENDIX_START };
 
-enum { LEAN_CODE, LEAN_DEF, LEAN_LEMMA, LEAN_THEOREM };
+enum { LEAN_CODE, LEAN_DEF, LEAN_LEMMA, LEAN_THEOREM, LEAN_COROLLARY };
 
 /* Buffers own their storage. The document arrays are reset before each build. */
 typedef struct {
@@ -85,7 +85,7 @@ typedef struct {
     char *s;
     char *doc_name, *doc_nl, *doc_formula;
     char *raw_name, *label;
-    int file, capture;
+    int file, capture, declaration_kind;
 } Segment;
 
 typedef struct {
