@@ -150,6 +150,19 @@ static void build_pdf(const char *tex) {
     free(pdf);
 }
 
+static int gather_root(const char *name, const char *kind, int for_tex) {
+    char *path = name[0] == '/' ? xstrdup(name) : join(basedir, name);
+    char *rel = project_rel(path);
+    free(path);
+    if (!rel) {
+        die("%s is missing or outside the project: %s", kind, name);
+        return -1;
+    }
+    int index = gather(rel, for_tex);
+    free(rel);
+    return index;
+}
+
 /* Stage each build so parsing and writing errors leave the last successful output alone. */
 static int build(int compile_pdf) {
     clear_project();
@@ -157,49 +170,31 @@ static int build(int compile_pdf) {
     doc_title = NULL;
     free(doc_author);
     doc_author = NULL;
-    char *rel = NULL;
-    if (root[0] == '/') {
-        rel = project_rel(root);
-    } else {
-        char *path = join(basedir, root);
-        rel = project_rel(path);
-        free(path);
+    int want_html = strcmp(format, "tex") != 0;
+    int want_tex = strcmp(format, "html") != 0;
+    int separate_tex = want_tex && tex_root && *tex_root;
+    root_index = tex_root_index = -1;
+    if (want_html || !separate_tex) {
+        root_index = gather_root(root, "root file", want_tex && !separate_tex);
+        if (failed || root_index < 0) {
+            return -1;
+        }
     }
-    if (!rel) {
-        die("root file is missing or outside the project: %s", root);
-        return -1;
-    }
-    root_index = gather(rel);
-    free(rel);
     int html_file_count = nfiles;
-    if (failed || root_index < 0) {
-        return -1;
-    }
-    tex_template_index = tex_class_index = -1;
-    if (strcmp(format, "html") && tex_template && *tex_template) {
-        char *path = join(basedir, tex_template);
-        char *template_rel = project_rel(path);
-        free(path);
-        if (!template_rel) {
-            die("TeX template is missing or outside the project: %s", tex_template);
-        } else {
-            tex_template_index = gather(template_rel);
-            free(template_rel);
+    if (separate_tex) {
+        if (!ends(tex_root, ".tex")) {
+            die("texRoot must name a .tex file: %s", tex_root);
+            return -1;
         }
-    }
-    if (strcmp(format, "html") && tex_class && *tex_class) {
-        char *path = join(basedir, tex_class);
-        char *class_rel = project_rel(path);
-        free(path);
-        if (!class_rel) {
-            die("TeX class is missing or outside the project: %s", tex_class);
-        } else {
-            tex_class_index = gather(class_rel);
-            free(class_rel);
+        tex_root_index = gather_root(tex_root, "TeX root", 1);
+        if (failed || tex_root_index < 0) {
+            return -1;
         }
+    } else if (want_tex) {
+        tex_root_index = root_index;
     }
-    if (failed) {
-        return -1;
+    if (root_index < 0) {
+        root_index = tex_root_index;
     }
     translate_parallel();
     flatten(root_index, 0);
@@ -316,7 +311,7 @@ static int build(int compile_pdf) {
 static void usage(void) {
     puts("Usage: myne [-i root|project-dir] [-f html|tex|both] [-o outputDir] [-s style] [--config "
          "file] "
-         "[--elaborated-deps] [--watch] [--serve] [--port N]");
+         "[--elaborated-deps] [--pdf] [--watch] [--serve] [--port N]");
 }
 
 int main(int argc, char **argv) {
@@ -326,7 +321,7 @@ int main(int argc, char **argv) {
             return 0;
         }
     }
-    int watch = 0, serve = 0, explicit_config = 0;
+    int watch = 0, serve = 0, explicit_config = 0, pdf = 0;
     char *input_arg = ".";
     int input_is_dir = 1;
     format = xstrdup("html");
@@ -411,6 +406,8 @@ int main(int argc, char **argv) {
             } else {
                 port = atoi(v);
             }
+        } else if (!strcmp(a, "--pdf")) {
+            pdf = 1;
         } else if (!strcmp(a, "--watch")) {
             watch = 1;
         } else if (!strcmp(a, "--elaborated-deps")) {
@@ -429,6 +426,10 @@ int main(int argc, char **argv) {
     if (!root || (strcmp(format, "html") && strcmp(format, "tex") && strcmp(format, "both"))) {
         usage();
         die("root or format is invalid");
+        return 1;
+    }
+    if (pdf && !strcmp(format, "html")) {
+        die("--pdf requires tex or both format");
         return 1;
     }
     if (serve && !strcmp(format, "tex")) {
@@ -454,7 +455,8 @@ int main(int argc, char **argv) {
         snprintf(output, sizeof(output), "%s", absolute);
         free(absolute);
     }
-    if (build(watch && !strcmp(format, "both"))) {
+    int compile_pdf = pdf || (watch && !strcmp(format, "both"));
+    if (build(compile_pdf)) {
         if (!watch) {
             fprintf(stderr, "myne: build failed; successful output formats were refreshed. Fix the errors above and rerun.\n");
             return 1;
@@ -476,7 +478,7 @@ int main(int argc, char **argv) {
         unsigned long long next = fingerprint_dir("", 0);
         if (next != previous) {
             previous = next;
-            if (build(watch && !strcmp(format, "both"))) {
+            if (build(compile_pdf)) {
                 fprintf(stderr,
                         "myne: rebuild failed; successful output formats were refreshed. Fix the errors above; "
                         "Myne will retry after another project file change.\n");

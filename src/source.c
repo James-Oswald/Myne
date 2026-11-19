@@ -717,8 +717,14 @@ static const TexMathSymbol tex_math_symbols[] = {
     {"▸", "\\triangleright"},
     {"⊣", "\\dashv"}, {"⊨", "\\models"}, {"⊩", "\\Vdash"},
     {"←", "\\leftarrow"}, {"→", "\\rightarrow"}, {"↔", "\\leftrightarrow"},
+    {"↑", "\\uparrow"}, {"↓", "\\downarrow"},
     {"⇐", "\\Leftarrow"}, {"⇒", "\\Rightarrow"}, {"⇔", "\\Leftrightarrow"},
     {"↦", "\\mapsto"}, {"↪", "\\hookrightarrow"}, {"↩", "\\hookleftarrow"},
+    {"↼", "\\leftharpoonup"}, {"↽", "\\leftharpoondown"},
+    {"↾", "\\upharpoonright"}, {"↿", "\\upharpoonleft"},
+    {"⇀", "\\rightharpoonup"}, {"⇁", "\\rightharpoondown"},
+    {"⇂", "\\downharpoonright"}, {"⇃", "\\downharpoonleft"},
+    {"⇋", "\\leftrightharpoons"}, {"⇌", "\\rightleftharpoons"},
     {"↗", "\\nearrow"}, {"↘", "\\searrow"}, {"↙", "\\swarrow"},
     {"↖", "\\nwarrow"}, {"↕", "\\updownarrow"}, {"⇑", "\\Uparrow"},
     {"⇓", "\\Downarrow"}, {"⇕", "\\Updownarrow"}, {"⟶", "\\longrightarrow"},
@@ -748,7 +754,7 @@ static const TexMathSymbol tex_math_symbols[] = {
     {"⁴", "^{4}"}, {"⁵", "^{5}"}, {"⁶", "^{6}"}, {"⁷", "^{7}"},
     {"⁸", "^{8}"}, {"⁹", "^{9}"}, {"⁺", "^{+}"}, {"⁻", "^{-}"},
     {"⁼", "^{=}"}, {"⁽", "^{(}"}, {"⁾", "^{)}"}, {"ⁿ", "^{n}"},
-    {"ⁱ", "^{i}"}, {"₀", "_{0}"}, {"₁", "_{1}"}, {"₂", "_{2}"},
+    {"ⁱ", "^{i}"}, {"ᵈ", "^{d}"}, {"₀", "_{0}"}, {"₁", "_{1}"}, {"₂", "_{2}"},
     {"₃", "_{3}"}, {"₄", "_{4}"}, {"₅", "_{5}"}, {"₆", "_{6}"},
     {"₇", "_{7}"}, {"₈", "_{8}"}, {"₉", "_{9}"}, {"₊", "_{+}"},
     {"₋", "_{-}"}, {"₌", "_{=}"}, {"₍", "_{(}"}, {"₎", "_{)}"},
@@ -805,6 +811,16 @@ static void tex_math_text(Buf *b, const char *s, size_t n, int *math_mode) {
             if (close < n) {
                 tex_inline_code(b, s + i + ticks, close - i - ticks);
                 i = close + ticks;
+                continue;
+            }
+        }
+        if (s[i] == '\\' && !tex_is_escaped(s, i)) {
+            size_t end;
+            char *key = NULL;
+            if (tex_reference_at(s, n, i, &end, &key)) {
+                addn(b, s + i, end - i);
+                free(key);
+                i = end;
                 continue;
             }
         }
@@ -1078,7 +1094,7 @@ static void *translate_worker(void *arg) {
             break;
         }
         if (files[id].lean) {
-            translate_lean(&files[id], id == root_index);
+            translate_lean(&files[id], id == tex_root_index);
         }
     }
     return NULL;

@@ -443,33 +443,38 @@ int file_index(const char *rel) {
 }
 
 /* A visiting file signals a cycle; completed files are reused. */
-int gather(const char *rel) {
+int gather(const char *rel, int for_tex) {
     int id = file_index(rel);
     if (id >= 0) {
         if (files[id].state == 1) {
             die("inclusion cycle at %s", rel);
             return -1;
         }
-        return id;
-    }
-    if (nfiles >= MAX_FILES) {
+        if (!for_tex || files[id].for_tex) {
+            return id;
+        }
+    } else if (nfiles >= MAX_FILES) {
         die("too many included files");
         return -1;
     }
-    id = nfiles++;
-    File *f = &files[id];
-    memset(f, 0, sizeof(*f));
-    f->rel = xstrdup(rel);
-    f->lean = ends(rel, ".lean");
-    f->state = 1;
-    char *path = join(basedir, rel);
-    f->data = read_all(path);
-    f->stamp = stamp(path);
-    free(path);
-    if (!f->data) {
-        die("cannot read %s", rel);
-        return -1;
+    if (id < 0) {
+        id = nfiles++;
+        File *f = &files[id];
+        memset(f, 0, sizeof(*f));
+        f->rel = xstrdup(rel);
+        f->lean = ends(rel, ".lean");
+        char *path = join(basedir, rel);
+        f->data = read_all(path);
+        f->stamp = stamp(path);
+        free(path);
+        if (!f->data) {
+            die("cannot read %s", rel);
+            return -1;
+        }
     }
+    File *f = &files[id];
+    f->state = 1;
+    f->for_tex = for_tex;
     const char *s = f->data;
     size_t n = strlen(s);
     for (size_t i = 0; i < n;) {
@@ -486,7 +491,7 @@ int gather(const char *rel) {
             if (!child) {
                 die("missing include %s from %s", ref, rel);
             } else {
-                gather(child);
+                gather(child, for_tex);
                 free(child);
             }
             free(ref);
@@ -712,10 +717,8 @@ void load_config(const char *path) {
             else if (!strcmp(mode, "elaborated")) elaborated_dependency_graph = 1;
             else die("dependencyGraph must be basic or elaborated");
             free(mode);
-        } else if (!strcmp(key, "texTemplate")) {
-            tex_template = unquote(value);
-        } else if (!strcmp(key, "texClass")) {
-            tex_class = unquote(value);
+        } else if (!strcmp(key, "texRoot")) {
+            tex_root = unquote(value);
         } else if (!strcmp(key, "bibliography")) {
             if (*value == '[') {
                 char *q = value + 1;

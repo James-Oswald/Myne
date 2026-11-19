@@ -25,33 +25,35 @@ class MyneTests(unittest.TestCase):
             base = Path(temp)
             (base / "src").mkdir()
             (base / "myne.toml").write_text(
-                'root = "main.lean"\nformat = "both"\ntexTemplate = "src/template.tex"\n'
+                'root = "main.lean"\nformat = "both"\ntexRoot = "src/document.tex"\n'
             )
             (base / "refs.bib").write_text("@article{sample, title={Sample}}\n")
-            template = base / "src/template.tex"
+            document = base / "src/document.tex"
+
             def tex(bib: str) -> str:
                 return (
                     "\\documentclass{article}\n"
-                    "{{MYNE_THEOREM_SETUP}}\n"
                     "\\begin{document}\n"
-                    "{{MYNE_CONTENT}}\n"
+                    "\\input{../chapter.lean}\n"
                     f"\\bibliography{{{bib}}}\n"
                     "\\end{document}\n"
                 )
-            template.write_text(tex("../refs"))
-            root = base / "main.lean"
-            root.write_text("/-! \\title{Test}\n\\section{Main}First version. -/\n")
+
+            document.write_text(tex("../refs"))
+            (base / "main.lean").write_text("/-! \\title{Test}\n\\input{chapter.lean}\n-/")
+            chapter = base / "chapter.lean"
+            chapter.write_text("/-! \\section{Main}First version. -/\n")
             first = run(cwd=base)
             self.assertEqual(first.returncode, 0, first.stderr)
-            old_tex = (base / "out/tex/src/template.tex").read_text()
-            root.write_text("/-! \\title{Test}\n\\section{Main}Second version. -/\n")
-            template.write_text(tex("refs"))
+            old_tex = (base / "out/tex/src/document.tex").read_text()
+            chapter.write_text("/-! \\section{Main}Second version. -/\n")
+            document.write_text(tex("refs"))
             second = run(cwd=base)
             self.assertNotEqual(second.returncode, 0)
-            self.assertIn("src/template.tex:5: \\bibliography{refs} requires src/refs.bib", second.stderr)
+            self.assertIn("src/document.tex:4: \\bibliography{refs} requires src/refs.bib", second.stderr)
             self.assertIn("use \\bibliography{../refs} here", second.stderr)
             self.assertIn("Second version.", (base / "out/html/section-001.html").read_text())
-            self.assertEqual(old_tex, (base / "out/tex/src/template.tex").read_text())
+            self.assertEqual(old_tex, (base / "out/tex/src/document.tex").read_text())
 
     def test_latex_quotation_marks_render_on_web(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -609,31 +611,118 @@ assert.deepStrictEqual(mobileHidden(), [false,true,true,true,false]);
                             root_tex.index("\\end{document}"))
             self.assertEqual(root_tex.count("\\appendix"), 1)
 
-    def test_lean_template_places_appendix_before_document_end(self) -> None:
+    def test_tex_root_uses_only_its_imports_and_places_appendices(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             (base / "myne.toml").write_text(
-                'root = "main.lean"\nformat = "tex"\ntexTemplate = "template.tex"\n'
+                'root = "main.lean"\nformat = "both"\ntexRoot = "document.tex"\n'
             )
-            (base / "template.tex").write_text(
-                "\\documentclass{article}\n{{MYNE_THEOREM_SETUP}}"
-                "\\begin{document}\n{{MYNE_CONTENT}}\n"
+            (base / "document.tex").write_text(
+                "\\documentclass{article}\n\\begin{document}\n"
+                "\\input{first.lean}\n\\input{second.lean}\n"
                 "\\section{Discussion}\n\\end{document}\n"
             )
             (base / "main.lean").write_text(
-                "/-! Main text. -/\n"
-                "--myne:appendix_start Proofs\n"
-                "/-! Appendix proof. -/\n"
-                "--myne:appendix_end\n"
+                "/-! # Web title\n\\input{web.lean}\n\\input{second.lean}\n-/\n"
             )
+            (base / "web.lean").write_text(
+                "/-! ## Web content -/\n"
+                "--myne:appendix_start Web appendix\n/-! Web proof. -/\n--myne:appendix_end\n"
+            )
+            (base / "first.lean").write_text(
+                "/-! First TeX chapter. -/\n"
+                "--myne:appendix_start Proofs\n/-! Appendix proof. -/\n--myne:appendix_end\n"
+            )
+            (base / "second.lean").write_text("/-! ## Shared chapter -/\n")
             result = run(cwd=base)
             self.assertEqual(result.returncode, 0, result.stderr)
-            template = (base / "out/tex/template.tex").read_text()
-            appendix = (base / "out/tex/main.myne-appendix.tex").read_text()
-            self.assertLess(template.index("\\section{Discussion}"), template.index("\\appendix"))
-            self.assertLess(template.index("\\appendix"), template.index("\\end{document}"))
-            self.assertIn("\\input{main.myne-appendix.tex}", template)
+            tex = base / "out/tex"
+            document = (tex / "document.tex").read_text()
+            appendix = (tex / "first.myne-appendix.tex").read_text()
+            self.assertFalse((tex / "web.tex").exists())
+            self.assertFalse((tex / "main.tex").exists())
+            self.assertLess(document.index("\\input{first.tex}"), document.index("\\input{second.tex}"))
+            self.assertLess(document.index("\\section{Discussion}"), document.index("\\appendix"))
+            self.assertLess(document.index("\\appendix"), document.index("\\end{document}"))
+            self.assertIn("\\input{first.myne-appendix.tex}", document)
             self.assertIn("\\section{Proofs}", appendix)
+
+    @unittest.skipUnless(shutil.which("latexmk"), "latexmk is required")
+    def test_nested_tex_root_loads_sibling_document_class(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "src"
+            source.mkdir()
+            (base / "myne.toml").write_text('root = "src/document.tex"\nformat = "tex"\n')
+            (source / "localclass.cls").write_text(
+                "\\ProvidesClass{localclass}\n"
+                "\\DeclareOption{example}{\\newcommand{\\LocalText}{Local class.}}\n"
+                "\\ProcessOptions\\relax\n\\LoadClass{article}\n"
+            )
+            (source / "document.tex").write_text(
+                "\\documentclass[example]{localclass}\n"
+                "\\begin{document}\n\\LocalText\n\\end{document}\n"
+            )
+            result = run("--pdf", cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            generated = base / "out/tex/src"
+            self.assertIn("\\documentclass[example]{src/localclass}",
+                          (generated / "document.tex").read_text())
+            self.assertTrue((generated / "document.pdf").is_file())
+
+    @unittest.skipUnless(shutil.which("latexmk"), "latexmk is required")
+    def test_pdf_build_resolves_unicode_lean_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "root.tex"\nformat = "tex"\n')
+            (base / "root.tex").write_text(
+                "\\documentclass{article}\n% \\begin{document}\n"
+                "\\begin{document}\n\\input{part.lean}\n\\end{document}\n"
+            )
+            (base / "part.lean").write_text(
+                "/-! See \\cref{Demo.δ}. -/\n"
+                "/-- A definition. -/\ndef Demo.δ : Nat := 0\n"
+            )
+            result = run("--pdf", cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            tex = base / "out/tex"
+            root = (tex / "root.tex").read_text()
+            self.assertLess(root.index("\\usepackage{amsthm}"), root.index("\\usepackage{cleveref}"))
+            self.assertLess(root.index("\\usepackage{cleveref}"), root.index("\\begin{document}\n\\input"))
+            part = (tex / "part.tex").read_text()
+            key = "myne-utf8:" + "Demo.δ".encode().hex()
+            self.assertIn("\\label{" + key + "}", part)
+            self.assertIn("\\cref{" + key + "}", part)
+            self.assertIn("\\newlabel{" + key + "}", (tex / "root.aux").read_text())
+            self.assertTrue((tex / "root.pdf").is_file())
+
+    def test_lean_unicode_arrows_export_to_tex(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            (base / "myne.toml").write_text('root = "main.lean"\nformat = "tex"\n')
+            (base / "main.lean").write_text(
+                "/-! # Unicode arrows\n"
+                "The type is $Q × Γ ⇀ Q$, and the flags are $M↑$ and $M↓_n$.\n"
+                "Other harpoons: $$↼ ↽ ↾ ↿ ⇁ ⇂ ⇃ ⇋ ⇌$$\n"
+                "-/\n",
+                encoding="utf-8",
+            )
+            with_pdf = bool(shutil.which("latexmk"))
+            result = run(*(["--pdf"] if with_pdf else []), cwd=base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            tex = base / "out/tex"
+            generated = (tex / "main.tex").read_text()
+            self.assertIn(r"$Q \times \Gamma \rightharpoonup Q$", generated)
+            self.assertIn(r"$M\uparrow$ and $M\downarrow_n$", generated)
+            self.assertIn(
+                r"$$\leftharpoonup \leftharpoondown \upharpoonright \upharpoonleft "
+                r"\rightharpoondown \downharpoonright \downharpoonleft "
+                r"\leftrightharpoons \rightleftharpoons$$",
+                generated,
+            )
+            if with_pdf:
+                self.assertTrue((tex / "main.pdf").is_file())
 
     def test_appendix_uses_configured_web_top_level(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -780,11 +869,11 @@ assert.deepStrictEqual(mobileHidden(), [false,true,true,true,false]);
         self.assertEqual(chapter_tex.count("\\begin{theorem}"), 1)
         self.assertIn("\\label{double_eq_add}", chapter_tex)
         self.assertNotIn("theorem double_eq_add", chapter_tex)
-        template = (project / "out/tex/template.tex").read_text()
-        self.assertIn("\\bibliography{references}", template)
-        self.assertIn("\\input{Chapters/Arithmetic.tex}", template)
+        document = (project / "out/tex/document.tex").read_text()
+        self.assertIn("\\bibliography{references}", document)
+        self.assertIn("\\input{Chapters/Arithmetic.tex}", document)
         index = (project / "out/html/index.html").read_text()
-        self.assertIn('href="../tex/template.pdf"', index)
+        self.assertIn('href="../tex/document.pdf"', index)
         self.assertIn("custom.css", index)
         self.assertIn("footnote", index)
         self.assertIn("knuth1984", index)

@@ -44,20 +44,16 @@ $(BIN_DIR)/assets.o: src/app_assets.inc src/katex_assets.inc
 pdfs: basic-pdf annotations-pdf thesis-pdf showcase-pdf
 
 basic-pdf: $(MYNE)
-	./$(MYNE) -i examples/basic -f both
-	cd examples/basic/out/tex && latexmk -pdf -quiet -interaction=nonstopmode -halt-on-error sample.tex
+	./$(MYNE) -i examples/basic -f both --pdf
 
 annotations-pdf: $(MYNE)
-	./$(MYNE) -i examples/annotations -f both
-	cd examples/annotations/out/tex && latexmk -pdf -quiet -interaction=nonstopmode -halt-on-error main.tex
+	./$(MYNE) -i examples/annotations -f both --pdf
 
 thesis-pdf: $(MYNE)
-	./$(MYNE) -i examples/thesis -f both
-	cd examples/thesis/out/tex && latexmk -pdf -quiet -interaction=nonstopmode -halt-on-error rpithes.tex
+	./$(MYNE) -i examples/thesis -f both --pdf
 
 showcase-pdf: $(MYNE)
-	./$(MYNE) -i examples/showcase -f both
-	cd examples/showcase/out/tex && latexmk -pdf -quiet -interaction=nonstopmode -halt-on-error template.tex
+	./$(MYNE) -i examples/showcase -f both --pdf
 
 clean:
 	rm -rf $(BIN_DIR) src/app_assets.inc src/katex_assets.inc

@@ -76,7 +76,7 @@ typedef struct {
 
 typedef struct {
     char *rel, *data, *tex, *appendix_tex;
-    int lean, state, has_boxes;
+    int lean, state, has_boxes, for_tex;
     long long stamp;
 } File;
 
@@ -141,9 +141,9 @@ extern int nmaps;
 extern DeclarationMapping declaration_maps[64];
 extern int ndeclaration_maps;
 extern char basedir[PATH_MAX], output[PATH_MAX];
-extern char *root, *format, *style, *tex_template, *tex_class, *page_heading, *bibcfg[64];
+extern char *root, *format, *style, *tex_root, *page_heading, *bibcfg[64];
 extern int nbibcfg;
-extern int live, port, failed, root_index, tex_template_index, tex_class_index;
+extern int live, port, failed, root_index, tex_root_index;
 extern int dark_mode_toggle, page_heading_level, web_table_of_contents;
 extern int web_reference_publication_venue, web_reference_editors;
 extern int web_reference_editors_only_without_authors;
@@ -180,9 +180,10 @@ int file_index(const char *rel);
 const char *finds(const char *s, size_t n, const char *pat);
 unsigned long long fingerprint_dir(const char *rel, int depth);
 void flatten(int id, int depth);
-int gather(const char *rel);
+int gather(const char *rel, int for_tex);
 int graphic_at(const char *s, size_t n, size_t i, size_t *end, char **arg);
 const char *heading_name(int type);
+int tex_reference_at(const char *s, size_t n, size_t i, size_t *end, char **arg);
 int include_at(const char *s, size_t n, size_t i, size_t *end, char **arg);
 char *join(const char *a, const char *b);
 int keyword(const char *s, size_t n);
